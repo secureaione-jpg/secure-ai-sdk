@@ -19,11 +19,18 @@ from __future__ import annotations
 
 import io
 import json
+import time
 import urllib.error
 
 import pytest
 
-from secure_ai import ActionBlocked, Finding, SecureAI, SecureAIError
+from secure_ai import (
+    ActionBlocked,
+    ApprovalRefused,
+    Finding,
+    SecureAI,
+    SecureAIError,
+)
 
 
 class FakeResponse:
@@ -277,3 +284,162 @@ class TestGuardTools:
         _calls, sai = client(lambda _r: allowed({}))
         odd = object()
         assert sai.guard_tools([odd]) == [odd]
+
+
+class TestHeldForAPerson:
+    """The branch that did not exist.
+
+    ``guard`` handled ``block`` and nothing else, so an ``approve`` decision
+    fell through to the send. On Python a policy saying an action must wait
+    for a human was not weakened but bypassed, and the agent was told the
+    check had passed.
+    """
+
+    @staticmethod
+    def _held(approval_id="ap1"):
+        return {
+            "decision": "approve",
+            "approvalId": approval_id,
+            "expiresAt": int(time.time() * 1000) + 600_000,
+            "map": {},
+            "findings": [{"kind": "card", "path": "body.note", "decision": "approve"}],
+            "toolDenied": False,
+            "policySource": "account",
+            "auditId": "a1",
+        }
+
+    @staticmethod
+    def _approval(status, **extra):
+        base = {
+            "id": "ap1",
+            "createdAt": int(time.time() * 1000) - 1000,
+            "expiresAt": int(time.time() * 1000) + 600_000,
+            "status": status,
+            "agent": "billing",
+            "tool": "mail.send",
+            "keyId": "k1",
+            "findings": [],
+        }
+        base.update(extra)
+        return {"approval": base}
+
+    def test_waits_then_sends_once_a_person_says_yes(self):
+        seen = []
+
+        def handler(req):
+            if req.full_url.endswith("/v1/inspect"):
+                body = json.loads(req.data.decode("utf-8"))
+                if body.get("approvalId"):
+                    return FakeResponse({
+                        "decision": "allow",
+                        "input": {"note": "go ahead"},
+                        "map": {}, "findings": [], "toolDenied": False,
+                        "policySource": "account", "auditId": "a2",
+                    })
+                return FakeResponse(self._held())
+            return FakeResponse(self._approval("approved"))
+
+        _, sai = client(handler)
+
+        def send(payload):
+            seen.append(payload)
+            return "sent"
+
+        assert sai.guard("mail.send", send)({"note": "original"}) == "sent"
+        # It went, and it went with what came back from the second check.
+        assert seen == [{"note": "go ahead"}]
+
+    def test_does_not_send_when_the_person_says_no(self):
+        def handler(req):
+            if req.full_url.endswith("/v1/inspect"):
+                return FakeResponse(self._held())
+            return FakeResponse(self._approval("denied", note="not this customer"))
+
+        _, sai = client(handler)
+        sent = []
+
+        with pytest.raises(ApprovalRefused) as caught:
+            sai.guard("mail.send", lambda p: sent.append(p))({"note": "x"})
+        assert caught.value.status == "denied"
+        assert "not this customer" in str(caught.value)
+        assert sent == []
+
+    def test_an_expiry_is_a_refusal_not_a_release(self):
+        def handler(req):
+            if req.full_url.endswith("/v1/inspect"):
+                return FakeResponse(self._held())
+            return FakeResponse(self._approval("expired"))
+
+        _, sai = client(handler)
+        sent = []
+        with pytest.raises(ApprovalRefused) as caught:
+            sai.guard("mail.send", lambda p: sent.append(p))({"note": "x"})
+        assert caught.value.status == "expired"
+        assert sent == []
+
+    def test_can_refuse_to_wait_and_hand_the_id_back(self):
+        _, sai = client(lambda req: FakeResponse(self._held()))
+        sent = []
+        with pytest.raises(ApprovalRefused) as caught:
+            sai.guard("mail.send", lambda p: sent.append(p), wait_for_approval=False)({"a": 1})
+        assert caught.value.status == "pending"
+        assert caught.value.approval_id == "ap1"
+        assert sent == []
+
+    def test_a_held_action_with_no_id_is_refused_rather_than_sent(self):
+        held = self._held()
+        del held["approvalId"]
+        _, sai = client(lambda req: FakeResponse(held))
+        sent = []
+        with pytest.raises(ActionBlocked):
+            sai.guard("mail.send", lambda p: sent.append(p))({"a": 1})
+        assert sent == []
+
+    def test_reads_the_queue(self):
+        def handler(req):
+            assert "status=pending" in req.full_url
+            return FakeResponse({"approvals": [self._approval("pending")["approval"]]})
+
+        _, sai = client(handler)
+        queue = sai.approvals(status="pending")
+        assert len(queue) == 1
+        assert queue[0].tool == "mail.send"
+        assert queue[0].status == "pending"
+
+    def test_escapes_the_id_in_the_path(self):
+        calls, sai = client(lambda req: FakeResponse(self._approval("approved")))
+        sai.approval("a/b?c")
+        assert "a%2Fb%3Fc" in calls[0]["url"]
+
+
+class TestARedactWithNothingToSend:
+    """The fallback that braced open.
+
+    The API omits ``input`` only on a block, so on a redact it is always
+    there — until some day it is not. ``guard`` fell back to the caller's own
+    input, which on a redact is the one thing that must not go: it still
+    holds the values the decision had just said to replace.
+    """
+
+    BROKEN = {
+        "decision": "redact",
+        "map": {},
+        "findings": [],
+        "toolDenied": False,
+        "policySource": "account",
+        "auditId": "a9",
+    }
+
+    def test_raises_rather_than_sending_the_original(self):
+        _, sai = client(lambda req: FakeResponse(self.BROKEN))
+        sent = []
+        with pytest.raises(SecureAIError) as caught:
+            sai.guard("mail.send", lambda p: sent.append(p))({"to": "ana@clientfirm.com"})
+        assert "nothing to send" in str(caught.value)
+        assert sent == []
+
+    def test_an_allow_still_passes_the_original_through(self):
+        allowed = dict(self.BROKEN, decision="allow")
+        _, sai = client(lambda req: FakeResponse(allowed))
+        original = {"note": "nothing sensitive"}
+        assert sai.guard("mail.send", lambda p: p)(original) == original

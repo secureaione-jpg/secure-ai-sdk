@@ -355,3 +355,55 @@ describe("actions held for a person", () => {
     expect(calls[0].url).toBe("https://api.test/v1/approvals?status=pending&limit=20");
   });
 });
+
+/*
+ * What happens when the answer is malformed.
+ *
+ * The API omits "input" only on a block, so on a redact it is always there —
+ * until some day it is not. guard used to fall back to the caller's own
+ * input in that case, which on a redact is the one thing that must not go:
+ * it still holds the values the decision had just said to replace. A missing
+ * field turned into the library doing the exact opposite of its purpose,
+ * silently, with the trail recording a redaction that never happened.
+ */
+describe("a redact with nothing to send", () => {
+  it("throws rather than sending the caller's own data", async () => {
+    const { sai } = client(() => ({
+      body: {
+        decision: "redact", map: {}, findings: [],
+        toolDenied: false, policySource: "account", auditId: "a9",
+      },
+    }));
+    const send = vi.fn(async () => "sent");
+    await expect(sai.guard("email.send", send)({ to: "ana@clientfirm.com" }))
+      .rejects.toThrow(/nothing to send/);
+    // The point of the test: the wrapped function never ran.
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("names it as ours rather than as a network failure", async () => {
+    const { sai } = client(() => ({
+      body: {
+        decision: "redact", map: {}, findings: [],
+        toolDenied: false, policySource: "account", auditId: "a9",
+      },
+    }));
+    await expect(sai.guard("email.send", async () => "x")({ a: 1 }))
+      .rejects.toBeInstanceOf(SecureAIError);
+  });
+
+  /* An allow is the opposite case: nothing was rewritten, so the caller's
+     own input is the correct thing to pass and the fallback belongs there. */
+  it("still passes the original through on an allow", async () => {
+    const { sai } = client(() => ({
+      body: {
+        decision: "allow", map: {}, findings: [],
+        toolDenied: false, policySource: "default", auditId: "a10",
+      },
+    }));
+    const send = vi.fn(async (x: unknown) => x);
+    const original = { note: "nothing sensitive" };
+    await expect(sai.guard("mail.send", send)(original)).resolves.toEqual(original);
+    expect(send).toHaveBeenCalledWith(original);
+  });
+});

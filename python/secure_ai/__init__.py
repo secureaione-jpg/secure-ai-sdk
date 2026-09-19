@@ -28,25 +28,30 @@ constraint — the constraint is that ``pip install secure-ai`` never fails.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, TypeVar
+from urllib.parse import quote, urlencode
 
 __all__ = [
     "SecureAI",
     "ActionBlocked",
+    "ApprovalRefused",
     "SecureAIError",
+    "Approval",
     "Finding",
     "Inspection",
     "KINDS",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 Decision = Literal["allow", "redact", "approve", "block"]
 Direction = Literal["outbound", "inbound"]
+ApprovalStatus = Literal["pending", "approved", "denied", "expired"]
 
 #: Every kind the scanner reports, in the order a policy editor should list
 #: them: the ones that end careers first. Mirrors KINDS in the Worker.
@@ -85,6 +90,76 @@ class Inspection:
     tool_denied: bool
     policy_source: str
     audit_id: str
+    #: Set when the decision is "approve": the id to come back with once a
+    #: person has decided.
+    approval_id: str | None = None
+    #: When waiting stops being worth it. Milliseconds since epoch.
+    expires_at: int | None = None
+
+
+def _sendable(tool: str, verdict: "Inspection", original: Any) -> Any:
+    """What to hand the wrapped function.
+
+    The API omits ``input`` only on a block, so on any other decision it is
+    there. The question is what to do if it is not, and the answer is not
+    "send what the caller had".
+
+    On a redact the caller's input is the one thing that must not go: it still
+    holds the values the decision just said to replace. Falling back to it
+    turns a missing field into the library doing the exact opposite of its
+    purpose, silently, with the trail recording a redaction that did not
+    happen.
+
+    On an allow nothing was rewritten, so the caller's own input is the right
+    thing to pass and the fallback belongs there.
+    """
+    if verdict.input is not None:
+        return verdict.input
+    if verdict.decision == "redact":
+        raise SecureAIError(
+            f"Secure AI decided to redact {tool} but returned nothing to send. "
+            "The original was not sent: it still holds the values that decision was about.",
+            502,
+            "missing_rewritten_input",
+        )
+    return original
+
+
+def _approval(raw: dict[str, Any]) -> "Approval":
+    return Approval(
+        id=raw.get("id", ""),
+        created_at=int(raw.get("createdAt", 0)),
+        expires_at=int(raw.get("expiresAt", 0)),
+        status=raw.get("status", "pending"),
+        agent=raw.get("agent"),
+        tool=raw.get("tool", ""),
+        key_id=raw.get("keyId", ""),
+        findings=[Finding(f["kind"], f["path"], f["decision"]) for f in raw.get("findings", [])],
+        decided_by=raw.get("decidedBy"),
+        decided_at=raw.get("decidedAt"),
+        note=raw.get("note"),
+    )
+
+
+@dataclass(frozen=True)
+class Approval:
+    """An action a rule stopped and handed to a person.
+
+    Holds the shape of what the agent wanted to do — the tool and the kinds it
+    carried — and never the payload, for the same reason the trail does not.
+    """
+
+    id: str
+    created_at: int
+    expires_at: int
+    status: ApprovalStatus
+    agent: str | None
+    tool: str
+    key_id: str
+    findings: list[Finding]
+    decided_by: str | None = None
+    decided_at: int | None = None
+    note: str | None = None
 
 
 class SecureAIError(RuntimeError):
@@ -119,6 +194,35 @@ class ActionBlocked(Exception):
         self.findings = result.findings
         self.tool_denied = result.tool_denied
         self.audit_id = result.audit_id
+
+
+class ApprovalRefused(Exception):
+    """A person was asked, and the action did not go.
+
+    Three ways to arrive here and they are not the same: denied means somebody
+    looked and said no; expired means nobody looked in time, which is also a
+    no because an approval that runs out is a refusal rather than a release;
+    pending means the caller asked not to wait.
+    """
+
+    def __init__(
+        self,
+        tool: str,
+        approval_id: str,
+        status: ApprovalStatus,
+        note: str | None = None,
+    ) -> None:
+        if status == "pending":
+            what = "and it is still waiting for a person"
+        elif status == "expired":
+            what = "and nobody answered before it expired"
+        else:
+            what = "and it was refused" + (": " + note if note else "")
+        super().__init__(f"Secure AI held {tool} for approval {what}.")
+        self.tool = tool
+        self.approval_id = approval_id
+        self.status = status
+        self.note = note
 
 
 @dataclass
@@ -189,14 +293,23 @@ class SecureAI:
         *,
         direction: Direction = "outbound",
         agent: str | None = None,
+        approval_id: str | None = None,
     ) -> Inspection:
-        """Judge an action without taking it."""
-        body = self._request("POST", "/v1/inspect", {
+        """Judge an action without taking it.
+
+        Pass ``approval_id`` to come back with a yes a person has given.
+        The server re-checks the shape of what is being sent against what was
+        approved, so one yes cannot be spent on a different action.
+        """
+        payload: dict[str, Any] = {
             "tool": tool,
             "input": action_input,
             "direction": direction,
             "agent": agent or self.agent,
-        })
+        }
+        if approval_id:
+            payload["approvalId"] = approval_id
+        body = self._request("POST", "/v1/inspect", payload)
         return Inspection(
             decision=body["decision"],
             input=body.get("input"),
@@ -205,6 +318,8 @@ class SecureAI:
             tool_denied=bool(body.get("toolDenied")),
             policy_source=body.get("policySource", "default"),
             audit_id=body.get("auditId", ""),
+            approval_id=body.get("approvalId"),
+            expires_at=body.get("expiresAt"),
         )
 
     def get_policy(self) -> dict[str, Any]:
@@ -244,6 +359,41 @@ class SecureAI:
 
     # ── the point of the library ────────────────────────────────────────────
 
+    def approval(self, approval_id: str) -> Approval:
+        """Read one back."""
+        body = self._request("GET", f"/v1/approvals/{quote(approval_id, safe='')}")
+        return _approval(body["approval"])
+
+    def approvals(
+        self,
+        *,
+        status: ApprovalStatus | None = None,
+        limit: int | None = None,
+    ) -> list[Approval]:
+        """The queue, newest first."""
+        query: dict[str, Any] = {}
+        if status:
+            query["status"] = status
+        if limit:
+            query["limit"] = limit
+        path = "/v1/approvals" + ("?" + urlencode(query) if query else "")
+        return [_approval(a) for a in self._request("GET", path).get("approvals", [])]
+
+    def wait_for_approval(self, approval_id: str, *, poll_seconds: float = 2.0) -> Approval:
+        """Block until somebody decides, or until the window closes.
+
+        Stops at the approval's own expiry rather than running forever: the
+        server denies it at that point regardless, so a caller polling past it
+        is waiting for an answer that has already been given.
+        """
+        while True:
+            current = self.approval(approval_id)
+            if current.status != "pending":
+                return current
+            if time.time() * 1000 >= current.expires_at:
+                return replace(current, status="expired")
+            time.sleep(poll_seconds)
+
     def guard(
         self,
         tool: str,
@@ -251,6 +401,8 @@ class SecureAI:
         *,
         direction: Direction = "outbound",
         agent: str | None = None,
+        wait_for_approval: bool = True,
+        poll_seconds: float = 2.0,
     ) -> Callable[[Any], T]:
         """Wrap a function so it cannot run unchecked.
 
@@ -262,6 +414,10 @@ class SecureAI:
         Calling ``fn`` with the redacted input rather than the caller's is the
         whole mechanism. Returning a verdict for the caller to check would make
         protection opt-in at every site, which is what this exists to stop.
+
+        An action held for a person waits by default. Pass
+        ``wait_for_approval=False`` to get :class:`ApprovalRefused` straight
+        away and do the waiting yourself.
         """
 
         def guarded(action_input: Any) -> T:
@@ -278,7 +434,36 @@ class SecureAI:
 
             if verdict.decision == "block":
                 raise ActionBlocked(tool, verdict)
-            return fn(verdict.input if verdict.input is not None else action_input)
+
+            # Held for a person.
+            #
+            # This branch did not exist. "approve" did not match "block", so
+            # the action was sent immediately: on Python a policy saying an
+            # action must wait for a human was not weakened but bypassed, and
+            # the agent was told the check had passed.
+            if verdict.decision == "approve":
+                approval_id = verdict.approval_id or ""
+                if not approval_id:
+                    raise ActionBlocked(tool, verdict)
+                if not wait_for_approval:
+                    raise ApprovalRefused(tool, approval_id, "pending")
+                decided = self.wait_for_approval(approval_id, poll_seconds=poll_seconds)
+                if decided.status != "approved":
+                    raise ApprovalRefused(tool, approval_id, decided.status, decided.note)
+                # Back with the id. The server re-checks the shape of what is
+                # being sent, so a yes cannot be spent on a different action.
+                after = self.inspect(
+                    tool,
+                    action_input,
+                    direction=direction,
+                    agent=agent,
+                    approval_id=approval_id,
+                )
+                if after.decision == "block":
+                    raise ActionBlocked(tool, after)
+                return fn(_sendable(tool, after, action_input))
+
+            return fn(_sendable(tool, verdict, action_input))
 
         guarded.__name__ = getattr(fn, "__name__", "guarded")
         guarded.__doc__ = getattr(fn, "__doc__", None)

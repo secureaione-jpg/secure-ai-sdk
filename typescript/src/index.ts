@@ -363,6 +363,35 @@ export class SecureAI {
    * check would make protection opt-in at every site, which is the thing this
    * exists to stop.
    */
+  /**
+   * What to hand the wrapped function.
+   *
+   * The API omits `input` only on a block, so on any other decision it is
+   * there. The question is what to do if it is not, and the answer is not
+   * "send what the caller had".
+   *
+   * On a redact, the caller's input is the one thing that must not go: it
+   * still contains the values the decision just said to replace. Falling
+   * back to it turns a missing field into the product doing the exact
+   * opposite of its purpose, silently, with the audit trail recording a
+   * redaction that did not happen. So a redact with nothing to send throws.
+   *
+   * On an allow, nothing was rewritten and the caller's own input is the
+   * correct thing to pass, so the fallback is right there and stays.
+   */
+  private sendable<A>(tool: string, verdict: InspectResult<A>, original: A): A {
+    if (verdict.input !== undefined) return verdict.input;
+    if (verdict.decision === "redact") {
+      throw new SecureAIError(
+        `Secure AI decided to redact ${tool} but returned nothing to send. ` +
+          `The original was not sent: it still holds the values that decision was about.`,
+        502,
+        "missing_rewritten_input",
+      );
+    }
+    return original;
+  }
+
   guard<A, R>(
     tool: string,
     fn: (input: A) => Promise<R> | R,
@@ -418,12 +447,10 @@ export class SecureAI {
           tool, input, direction: opts?.direction, agent: opts?.agent, approvalId: id,
         });
         if (after.decision === "block") throw new ActionBlocked(tool, after);
-        return await fn((after.input ?? input) as A);
+        return await fn(this.sendable(tool, after, input));
       }
 
-      // input is present whenever the decision is not block; the fallback is
-      // belt and braces against a future field being dropped.
-      return await fn((verdict.input ?? input) as A);
+      return await fn(this.sendable(tool, verdict, input));
     };
   }
 
