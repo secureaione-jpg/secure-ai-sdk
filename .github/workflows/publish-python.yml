@@ -1,0 +1,47 @@
+# Publish the Python SDK to PyPI.
+#
+# Runs on a tag, and only after the tests have passed in the same job — a
+# release that skips the suite is how a broken version reaches people who
+# cannot unsee it, since PyPI does not allow re-uploading a version.
+#
+# No API token. This uses PyPI's trusted publishing: the repository and
+# workflow are named on the PyPI side, and GitHub proves the run's identity
+# with a short-lived OIDC token. Nothing long-lived exists to leak, and
+# nobody has to keep a secret in the repository settings.
+name: Publish Python
+
+on:
+  push:
+    tags: ["python-v*"]
+  # So a release can be made from the Actions tab without pushing a tag.
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Required for trusted publishing. Nothing else is granted.
+      id-token: write
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The floor as well as the current version, because pyproject claims
+      # >=3.9 and a claim nothing checks stops being true.
+      - run: pip install pytest build
+      - run: python -m pytest -q
+
+      - run: python -m build
+
+      # Shows what is about to go out, in the log, before it goes.
+      - run: ls -l dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist
