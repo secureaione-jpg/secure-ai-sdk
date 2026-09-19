@@ -1,0 +1,48 @@
+# Both SDKs, on every push.
+#
+# The Python suite has never run. It was written on a machine with no Python
+# interpreter, against the same API the TypeScript suite already proves, and
+# has sat unexecuted ever since. A public repository gets Actions minutes for
+# nothing, so the first push here is also the first time that code runs at
+# all — which is the main reason this file exists.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+      # The published artefact, built here so a broken build cannot reach npm.
+      - run: npm run build
+
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    strategy:
+      # The floor and something current. pyproject claims >=3.9, and a claim
+      # nothing checks is a claim that stops being true.
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pytest
+      - run: python -m pytest -q
