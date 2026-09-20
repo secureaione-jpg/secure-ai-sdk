@@ -8,14 +8,16 @@ nothing that watches what people type ever sees it go. These libraries put a
 check in front of the action instead: the agent says what it is about to do,
 and gets back a decision before it does it.
 
-| | Install | Status |
+| | Install | Published |
 |---|---|---|
-| [TypeScript](typescript) | `npm install @secure-ai/guard` | Not yet published |
-| [Python](python) | `pip install secure-ai-guard` | Not yet published |
+| [TypeScript](typescript) | `npm install @secure-ai/guard` | [npm](https://www.npmjs.com/package/@secure-ai/guard) |
+| [Python](python) | `pip install secure-ai-guard` | [PyPI](https://pypi.org/project/secure-ai-guard/) |
 
-Both are version 0.1.0 and neither is on a registry yet. Until they are, use
-the API directly — or the gateway or MCP endpoint below, which need no client
-library at all.
+Both are 0.2.1. Neither has a dependency. If you would rather not install
+anything, the gateway and the MCP endpoint below need no client library.
+
+Upgrade from 0.2.0 if you have it: that version defaulted to a hostname that
+was never created, so every call failed on DNS.
 
 ## The one thing worth knowing
 
