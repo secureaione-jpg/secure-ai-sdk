@@ -53,13 +53,12 @@ Neither of these needs a client library:
   an `X-Secure-AI-Target: https://api.vendor.com/…` header. Point an HTTP
   client at it and every request through it is checked. No code to change.
 
-  The destination also goes after `/v1/gateway/` in the path, but only
-  against the Worker host directly —
-  `secure-ai-worker.secureai-one.workers.dev`. On `secureai.one` the proxy
-  in front normalises `//` in a path and answers `308` to
-  `…/gateway/https:/api.vendor.com/…`, one slash, which the gateway then
-  refuses as a destination. The header form has no such problem and is the
-  one to reach for.
+  The destination can also go after `/v1/gateway/` in the path, which reads
+  better. On `secureai.one` that costs a redirect: the proxy in front
+  collapses the `//` in the scheme and answers `308` to the same path a
+  slash shorter. It is relative, so your key survives it and the gateway
+  reads the destination correctly on arrival. Use the header if your client
+  does not follow redirects, or to save the round trip.
 - **MCP** — `https://secureai.one/mcp`. Hand an assistant the URL and it
   gets `redact`, `restore`, `inspect_action`, `check_policy` and
   `recent_activity` as tools it can call.
