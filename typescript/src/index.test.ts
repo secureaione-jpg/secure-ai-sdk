@@ -406,4 +406,74 @@ describe("a redact with nothing to send", () => {
     await expect(sai.guard("mail.send", send)(original)).resolves.toEqual(original);
     expect(send).toHaveBeenCalledWith(original);
   });
+
+  /*
+   * A decision this version has never heard of.
+   *
+   * Only allow and redact mean "this may go". The check used to be the other
+   * way round — refuse on block, refuse on approve, send otherwise — which
+   * is how "approve" itself got sent when it was introduced: the client
+   * compared against "block", saw no match, and called through.
+   *
+   * A policy gains a decision, an agent keeps an older client, and the
+   * failure has to be a refusal rather than a send.
+   */
+  it("refuses a decision it does not recognise rather than sending", async () => {
+    const { sai } = client(() => ({
+      body: {
+        decision: "quarantine", map: {}, findings: [],
+        toolDenied: false, policySource: "default", auditId: "a11",
+      },
+    }));
+    const send = vi.fn(async (x: unknown) => x);
+
+    await expect(sai.guard("mail.send", send)({ note: "hello" })).rejects.toThrow(
+      /does not know how to send safely/,
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("names the unknown decision, so the log says which one", async () => {
+    const { sai } = client(() => ({
+      body: {
+        decision: "quarantine", map: {}, findings: [],
+        toolDenied: false, policySource: "default", auditId: "a12",
+      },
+    }));
+
+    await expect(
+      sai.guard("mail.send", async (x: unknown) => x)({ note: "hello" }),
+    ).rejects.toMatchObject({ code: "unknown_decision", message: /"quarantine"/ });
+  });
+
+  /* The same guard on the second inspect, the one made after a person says
+     yes. That call is the last thing between an approval and the action. */
+  it("refuses an unknown decision on the re-check after an approval", async () => {
+    let inspects = 0;
+    const { sai } = client((url) => {
+      if (url.endsWith("/v1/inspect")) {
+        inspects += 1;
+        return inspects === 1
+          ? {
+              body: {
+                decision: "approve", approvalId: "ap_1", findings: [],
+                toolDenied: false, policySource: "default", auditId: "a13",
+              },
+            }
+          : {
+              body: {
+                decision: "quarantine", map: {}, findings: [],
+                toolDenied: false, policySource: "default", auditId: "a14",
+              },
+            };
+      }
+      return { body: { approval: { id: "ap_1", status: "approved", tool: "mail.send" } } };
+    });
+    const send = vi.fn(async (x: unknown) => x);
+
+    await expect(
+      sai.guard("mail.send", send, { pollMs: 1 })({ note: "hello" }),
+    ).rejects.toThrow(/does not know how to send safely/);
+    expect(send).not.toHaveBeenCalled();
+  });
 });

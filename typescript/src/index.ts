@@ -380,7 +380,7 @@ export class SecureAI {
    * What to hand the wrapped function.
    *
    * The API omits `input` only on a block, so on any other decision it is
-   * there. The question is what to do if it is not, and the answer is not
+   * there. The question is what to do when it is not, and the answer is not
    * "send what the caller had".
    *
    * On a redact, the caller's input is the one thing that must not go: it
@@ -391,8 +391,36 @@ export class SecureAI {
    *
    * On an allow, nothing was rewritten and the caller's own input is the
    * correct thing to pass, so the fallback is right there and stays.
+   *
+   * ── Why this asks which decisions may send, rather than which may not ──
+   *
+   * Two decisions mean "this may go": allow and redact. Every other value,
+   * present or future, means it may not. Asked the other way round — refuse
+   * on block, refuse on approve, send otherwise — a decision added to the
+   * policy later is sent by a client that has never heard of it, and the
+   * agent is told the check passed.
+   *
+   * That is not hypothetical here. It is the bug this library already had:
+   * "approve" was added, `guard` compared against "block" and nothing else,
+   * and an action a policy said must wait for a person went immediately.
+   * The Python comment on that branch still records it. The same shape cost
+   * ten fixes across the Worker, the dashboard and both clients.
+   *
+   * Reachable today? No. The Worker returns 409 rather than a second
+   * "approve" when an approval cannot be redeemed, so the re-check after a
+   * yes comes back allow, redact, or an error. This is the client refusing
+   * to depend on that, across a version boundary it does not control.
    */
   private sendable<A>(tool: string, verdict: InspectResult<A>, original: A): A {
+    if (verdict.decision !== "allow" && verdict.decision !== "redact") {
+      throw new SecureAIError(
+        `Secure AI answered "${verdict.decision}" for ${tool}, which this ` +
+          `version does not know how to send safely. Nothing was sent. ` +
+          `Upgrade @secure-ai/guard.`,
+        502,
+        "unknown_decision",
+      );
+    }
     if (verdict.input !== undefined) return verdict.input;
     if (verdict.decision === "redact") {
       throw new SecureAIError(

@@ -1,12 +1,9 @@
 """The Python SDK.
 
-NOT YET EXECUTED. There is no Python interpreter on the machine this was
-written on, so every test below is unrun. They are written to the same shape as
-the TypeScript suite — which does pass — and the behaviours they pin are the
-ones that suite already proves at the API boundary, so the risk is in this
-file's own syntax rather than in what it asserts. Run ``pytest`` once before
-trusting any of it, and treat a first-run failure as a bug in the SDK, not as
-a surprise.
+These run. They were written believing the machine had no interpreter — the
+Microsoft Store alias on PATH answers "Python was not found", and the real
+3.12 install sits in AppData a directory away — so for a while this file said
+it had never been executed. It has: locally, and on both legs of CI.
 
 The behaviour worth most of these: ``guard`` calls the wrapped function with
 the *rewritten* input, not the caller's. That is what makes protection
@@ -443,3 +440,68 @@ class TestARedactWithNothingToSend:
         _, sai = client(lambda req: FakeResponse(allowed))
         original = {"note": "nothing sensitive"}
         assert sai.guard("mail.send", lambda p: p)(original) == original
+
+
+class TestADecisionThisVersionDoesNotKnow:
+    """Only allow and redact mean "this may go".
+
+    The check used to be the other way round -- refuse on block, refuse on
+    approve, send otherwise -- and that is how "approve" itself got sent when
+    it was introduced: the client compared against "block", found no match,
+    and called through. A policy gains a decision, an agent keeps an older
+    client, and the failure has to be a refusal rather than a send.
+    """
+
+    UNKNOWN = {
+        "decision": "quarantine",
+        "map": {},
+        "findings": [],
+        "toolDenied": False,
+        "policySource": "account",
+        "auditId": "a11",
+    }
+
+    def test_refuses_rather_than_sending(self):
+        _, sai = client(lambda req: FakeResponse(self.UNKNOWN))
+        sent = []
+        with pytest.raises(SecureAIError) as caught:
+            sai.guard("mail.send", lambda p: sent.append(p))({"note": "hello"})
+        assert "does not know how to send safely" in str(caught.value)
+        assert sent == []
+
+    def test_names_the_decision_and_the_code(self):
+        _, sai = client(lambda req: FakeResponse(self.UNKNOWN))
+        with pytest.raises(SecureAIError) as caught:
+            sai.guard("mail.send", lambda p: p)({"note": "hello"})
+        assert "quarantine" in str(caught.value)
+        assert caught.value.code == "unknown_decision"
+
+    def test_refuses_on_the_re_check_after_an_approval(self):
+        """The second inspect is the last thing between a yes and the action."""
+        state = {"inspects": 0}
+
+        def handler(req):
+            if req.full_url.endswith("/v1/inspect"):
+                state["inspects"] += 1
+                if state["inspects"] == 1:
+                    return FakeResponse({
+                        "decision": "approve",
+                        "approvalId": "ap_1",
+                        "findings": [],
+                        "toolDenied": False,
+                        "policySource": "account",
+                        "auditId": "a12",
+                    })
+                return FakeResponse(self.UNKNOWN)
+            return FakeResponse({
+                "approval": {"id": "ap_1", "status": "approved", "tool": "mail.send"}
+            })
+
+        _, sai = client(handler)
+        sent = []
+        with pytest.raises(SecureAIError) as caught:
+            sai.guard("mail.send", lambda p: sent.append(p), poll_seconds=0.01)(
+                {"note": "hello"}
+            )
+        assert "does not know how to send safely" in str(caught.value)
+        assert sent == []

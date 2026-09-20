@@ -112,7 +112,35 @@ def _sendable(tool: str, verdict: "Inspection", original: Any) -> Any:
 
     On an allow nothing was rewritten, so the caller's own input is the right
     thing to pass and the fallback belongs there.
+
+    Which decisions may send, rather than which may not
+    ---------------------------------------------------
+
+    Two decisions mean "this may go": allow and redact. Every other value,
+    present or future, means it may not. Asked the other way round -- refuse
+    on block, refuse on approve, send otherwise -- a decision added to the
+    policy later is sent by a client that has never heard of it, and the
+    agent is told the check passed.
+
+    That is not hypothetical. It is the bug the branch in :meth:`guard`
+    still carries a comment about: "approve" was added, the check compared
+    against "block" and nothing else, and an action a policy said must wait
+    for a person went immediately. The same shape cost ten fixes across the
+    Worker, the dashboard and both clients.
+
+    Reachable today? No. The Worker answers 409 rather than a second
+    "approve" when an approval cannot be redeemed, so the re-check after a
+    yes comes back allow, redact, or an error. This is the client declining
+    to depend on that, across a version boundary it does not control.
     """
+    if verdict.decision not in ("allow", "redact"):
+        raise SecureAIError(
+            f'Secure AI answered "{verdict.decision}" for {tool}, which this '
+            "version does not know how to send safely. Nothing was sent. "
+            "Upgrade secure-ai-guard.",
+            502,
+            "unknown_decision",
+        )
     if verdict.input is not None:
         return verdict.input
     if verdict.decision == "redact":
