@@ -280,7 +280,7 @@ class SecureAI:
         )
         opener = self._opener or urllib.request.urlopen
         try:
-            with opener(req, timeout=self.timeout) as res:  # type: ignore[operator]
+            with opener(req, timeout=self.timeout) as res:
                 raw = res.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")

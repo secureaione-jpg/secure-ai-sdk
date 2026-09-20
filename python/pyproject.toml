@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "secure-ai-guard"
-version = "0.2.1"
+version = "0.2.2"
 description = "Data loss prevention for AI agents. Inspect what an agent is about to do, before it does it."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,21 @@ Homepage = "https://secureai.one/developers"
 dev = ["pytest>=7"]
 
 [tool.hatch.build.targets.wheel]
+# secure_ai/py.typed rides along with the package and is not named here.
+# It is PEP 561: without that marker inside the wheel, a type checker in
+# somebody else's project treats every annotation in __init__.py as absent
+# and infers Any throughout -- which matters most for the one thing this
+# library exists to return. Decision is
+# Literal["allow", "redact", "approve", "block"], and comparing it to a
+# misspelling should be a red squiggle in the editor. Through 0.2.1 it was
+# not, because the file did not exist.
+#
+# It needs no force-include: hatchling takes every file under the package.
+# Verified by building the wheel with the entry removed and confirming the
+# marker was still in it. What the build does not guarantee is that the
+# file still exists, so publish-python.yml opens the wheel and fails the
+# release if the marker is missing -- PyPI does not allow replacing a
+# version, so that check has to run before the upload.
 packages = ["secure_ai"]
 
 [tool.pytest.ini_options]

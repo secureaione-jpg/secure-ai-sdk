@@ -1,10 +1,9 @@
 # Both SDKs, on every push.
 #
-# The Python suite has never run. It was written on a machine with no Python
-# interpreter, against the same API the TypeScript suite already proves, and
-# has sat unexecuted ever since. A public repository gets Actions minutes for
-# nothing, so the first push here is also the first time that code runs at
-# all — which is the main reason this file exists.
+# The Python suite was written on a machine thought to have no interpreter,
+# against the same API the TypeScript suite already proves, and sat
+# unexecuted until this file first ran it. A public repository gets Actions
+# minutes for nothing, which is the main reason this file exists.
 name: CI
 
 on:
@@ -46,3 +45,26 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install pytest
       - run: python -m pytest -q
+
+      # The package ships secure_ai/py.typed, so from 0.2.2 these annotations
+      # are not decoration: a type checker in somebody else's project reads
+      # them and reports against them. A signature that is wrong here is a
+      # wrong error in their editor, so it is checked here.
+      #
+      # Default strictness, not --strict, because that is what a caller
+      # actually experiences. --strict additionally objects that _request
+      # returns Any, which is true of any JSON call and says nothing about
+      # whether the public signatures are right.
+      #
+      # On the newest leg only. mypy no longer accepts 3.9 as a target, so
+      # pip on the 3.9 runner resolves some older release with its own
+      # opinions, and two versions disagreeing is a red build that means
+      # nothing. The annotations do not vary by interpreter -- the file is
+      # under "from __future__ import annotations", which is what lets
+      # it write "str | None" and still import on 3.9. pytest on the 3.9
+      # leg is what proves that.
+      - name: Type-check the public signatures
+        if: matrix.python-version == '3.12'
+        run: |
+          pip install mypy
+          python -m mypy secure_ai

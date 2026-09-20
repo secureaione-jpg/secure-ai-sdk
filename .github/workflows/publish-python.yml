@@ -42,6 +42,29 @@ jobs:
       # Shows what is about to go out, in the log, before it goes.
       - run: ls -l dist
 
+      # PEP 561: the marker has to be INSIDE the wheel, and whether it gets
+      # there depends on build config that no test exercises. 0.2.1 shipped
+      # without it and nothing noticed, because a missing marker does not
+      # fail anything -- it just makes every annotation invisible to a type
+      # checker in somebody else's project. PyPI does not allow replacing a
+      # version, so this has to fail before the upload, not after.
+      - name: The wheel must carry py.typed
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheels = glob.glob("dist/*.whl")
+          if not wheels:
+              sys.exit("no wheel was built")
+          for w in wheels:
+              names = zipfile.ZipFile(w).namelist()
+              if "secure_ai/py.typed" not in names:
+                  print("contents of", w)
+                  for n in names:
+                      print("   ", n)
+                  sys.exit(w + " has no secure_ai/py.typed")
+              print(w, ": py.typed present")
+          PY
+
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: python/dist
