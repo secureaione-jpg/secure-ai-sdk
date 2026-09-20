@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "secure-ai"
+name = "secure-ai-guard"
 version = "0.2.0"
 description = "Data loss prevention for AI agents. Inspect what an agent is about to do, before it does it."
 readme = "README.md"

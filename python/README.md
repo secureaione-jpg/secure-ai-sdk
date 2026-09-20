@@ -4,7 +4,7 @@ Data loss prevention for AI agents. Put a check in front of every action an
 agent takes, before it takes it.
 
 ```bash
-pip install secure-ai
+pip install secure-ai-guard
 ```
 
 > **Status:** written, not yet executed — there was no Python interpreter on

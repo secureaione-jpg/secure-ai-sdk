@@ -11,7 +11,7 @@ and gets back a decision before it does it.
 | | Install | Status |
 |---|---|---|
 | [TypeScript](typescript) | `npm install @secure-ai/guard` | Not yet published |
-| [Python](python) | `pip install secure-ai` | Not yet published |
+| [Python](python) | `pip install secure-ai-guard` | Not yet published |
 
 Both are version 0.1.0 and neither is on a registry yet. Until they are, use
 the API directly — or the gateway or MCP endpoint below, which need no client
