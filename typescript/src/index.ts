@@ -183,7 +183,20 @@ export interface ClientOptions {
   onUnreachable?: "closed" | "open";
 }
 
-const DEFAULT_BASE = "https://api.secureai.one";
+/**
+ * Where the client talks to, when nobody says otherwise.
+ *
+ * This was an api. subdomain in 0.2.0, and that host does not
+ * exist -- it was never created. Nothing caught it: the tests
+ * pass a baseUrl, the typecheck has no opinion about a string, and the
+ * package published cleanly. The first person to install the SDK and follow
+ * the README would have got ENOTFOUND on their first call.
+ *
+ * secureai.one/v1 is the address the docs have always given and it is
+ * proxied to the Worker, so this is the same endpoint the curl examples hit.
+ * Keep the two in step: docs/api.md in the web repo is the other half.
+ */
+const DEFAULT_BASE = "https://secureai.one";
 
 export class SecureAI {
   private readonly apiKey: string;

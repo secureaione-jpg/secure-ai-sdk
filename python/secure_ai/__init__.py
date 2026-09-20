@@ -243,7 +243,18 @@ class SecureAI:
     """
 
     api_key: str
-    base_url: str = "https://api.secureai.one"
+    #: Where the client talks to, when nobody says otherwise.
+    #:
+    #: This was an api. subdomain in 0.2.0, and that host does not
+    #: exist -- it was never created. Nothing caught it:
+    #: the tests pass a base_url, and the package built and published
+    #: cleanly. The first person to pip install this and follow the README
+    #: would have got a DNS failure on their first call.
+    #:
+    #: secureai.one/v1 is the address the docs have always given and it is
+    #: proxied to the Worker, so this is the same endpoint the curl
+    #: examples hit.
+    base_url: str = "https://secureai.one"
     agent: str | None = None
     timeout: float = 5.0
     on_unreachable: Literal["closed", "open"] = "closed"

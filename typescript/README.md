@@ -133,7 +133,7 @@ cause in a process already carrying too many.
 ## Also available over MCP
 
 Agents that speak MCP can reach the same controls as tools at
-`https://api.secureai.one/mcp` — `inspect_action`, `check_policy`,
+`https://secureai.one/mcp` — `inspect_action`, `check_policy`,
 `recent_activity`, plus `redact` and `restore`.
 
 Full reference: <https://secureai.one/developers>

@@ -47,10 +47,18 @@ Every check returns one of:
 
 Neither of these needs a client library:
 
-- **Gateway** — `POST https://api.secureai.one/v1/gateway/https://api.vendor.com/…`
-  Point an HTTP client at it and every request through it is checked. No code
-  to change.
-- **MCP** — `https://api.secureai.one/mcp`. Hand an assistant the URL and it
+- **Gateway** — `POST https://secureai.one/v1/gateway` with the destination in
+  an `X-Secure-AI-Target: https://api.vendor.com/…` header. Point an HTTP
+  client at it and every request through it is checked. No code to change.
+
+  The destination also goes after `/v1/gateway/` in the path, but only
+  against the Worker host directly —
+  `secure-ai-worker.secureai-one.workers.dev`. On `secureai.one` the proxy
+  in front normalises `//` in a path and answers `308` to
+  `…/gateway/https:/api.vendor.com/…`, one slash, which the gateway then
+  refuses as a destination. The header form has no such problem and is the
+  one to reach for.
+- **MCP** — `https://secureai.one/mcp`. Hand an assistant the URL and it
   gets `redact`, `restore`, `inspect_action`, `check_policy` and
   `recent_activity` as tools it can call.
 
