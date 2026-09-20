@@ -198,6 +198,31 @@ export interface ClientOptions {
  */
 const DEFAULT_BASE = "https://secureai.one";
 
+/**
+ * An approval off the wire, with the one field the wait loop depends on
+ * made a number.
+ *
+ * waitForApproval stops when now is past expiresAt. Handed a body without
+ * one, `Date.now() >= undefined` is a NaN comparison, which is false —
+ * so the loop never stops. Not an error, not a hang anybody can see from
+ * the outside: a guarded call polling a metered API every two seconds for
+ * as long as the process lives.
+ *
+ * The Python client already coerced this, defaulting a missing expiry to 0
+ * and so treating it as already expired. This is the same rule: anything
+ * that is not a finite number means expired, which refuses rather than
+ * waits. Today's Worker always sends one — buildApproval sets it from a
+ * bounded TTL — and the client should not be the reason a change there
+ * becomes an infinite loop in somebody's agent.
+ */
+function toApproval(raw: Partial<Approval> | undefined): Approval {
+  const expiresAt = Number((raw as { expiresAt?: unknown })?.expiresAt);
+  return {
+    ...(raw as Approval),
+    expiresAt: Number.isFinite(expiresAt) ? expiresAt : 0,
+  };
+}
+
 export class SecureAI {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -275,7 +300,7 @@ export class SecureAI {
   /** One held action. */
   async approval(id: string): Promise<Approval> {
     const body = await this.request<{ approval: Approval }>("GET", `/v1/approvals/${encodeURIComponent(id)}`);
-    return body.approval;
+    return toApproval(body.approval);
   }
 
   /** Everything waiting, for a reviewer's screen. */
@@ -285,7 +310,7 @@ export class SecureAI {
     if (opts?.limit) q.set("limit", String(opts.limit));
     const qs = q.toString();
     const body = await this.request<{ approvals: Approval[] }>("GET", `/v1/approvals${qs ? `?${qs}` : ""}`);
-    return body.approvals;
+    return (body.approvals ?? []).map(toApproval);
   }
 
   /**

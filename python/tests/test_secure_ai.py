@@ -505,3 +505,44 @@ class TestADecisionThisVersionDoesNotKnow:
             )
         assert "does not know how to send safely" in str(caught.value)
         assert sent == []
+
+
+class TestAnApprovalWithNoExpiry:
+    """The wait loop stops at the approval's own expiry, so the expiry has
+    to be a number.
+
+    _approval already coerces a missing one to 0, which reads as already
+    expired and refuses. Nothing pinned that, and the TypeScript client --
+    which did not coerce -- polled a metered API every two seconds forever
+    when handed the same body. Untested correctness on one side and a live
+    bug on the other is the same omission twice.
+    """
+
+    def test_refuses_instead_of_polling_forever(self):
+        polls = {"n": 0}
+
+        def handler(req):
+            if "/v1/approvals/" in req.full_url:
+                polls["n"] += 1
+                return FakeResponse({
+                    "approval": {"id": "ap_1", "status": "pending", "tool": "mail.send"}
+                })
+            return FakeResponse({
+                "decision": "approve",
+                "approvalId": "ap_1",
+                "findings": [],
+                "toolDenied": False,
+                "policySource": "account",
+                "auditId": "a13",
+            })
+
+        _, sai = client(handler)
+        sent = []
+        with pytest.raises(ApprovalRefused) as caught:
+            sai.guard("mail.send", lambda p: sent.append(p), poll_seconds=0.01)(
+                {"note": "hello"}
+            )
+        assert caught.value.status == "expired"
+        assert sent == []
+        # One look, then the missing expiry decides it. Not a loop.
+        assert polls["n"] == 1

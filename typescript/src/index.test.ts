@@ -448,6 +448,50 @@ describe("a redact with nothing to send", () => {
 
   /* The same guard on the second inspect, the one made after a person says
      yes. That call is the last thing between an approval and the action. */
+  /*
+   * An approval with no expiry on it.
+   *
+   * waitForApproval stops when now is past expiresAt, and `Date.now() >=
+   * undefined` is a NaN comparison, so it is false and the loop does not
+   * stop. Nothing throws and nothing hangs visibly: a guarded call polls a
+   * metered API every two seconds for as long as the process lives. The
+   * Python client already coerced this and this one did not.
+   *
+   * vi.useFakeTimers is what makes the difference testable at all — under
+   * real timers a regression here does not fail, it runs until the suite
+   * is killed.
+   */
+  it("treats an approval with no expiry as expired instead of polling forever", async () => {
+    vi.useFakeTimers();
+    try {
+      let polls = 0;
+      const { sai } = client((url) => {
+        if (url.includes("/v1/approvals/")) {
+          polls += 1;
+          return { body: { approval: { id: "ap_1", status: "pending", tool: "mail.send" } } };
+        }
+        return {
+          body: {
+            decision: "approve", approvalId: "ap_1", findings: [],
+            toolDenied: false, policySource: "default", auditId: "a15",
+          },
+        };
+      });
+      const send = vi.fn(async (x: unknown) => x);
+
+      const ran = sai.guard("mail.send", send, { pollMs: 1 })({ note: "hi" });
+      const settled = expect(ran).rejects.toBeInstanceOf(ApprovalRefused);
+      await vi.advanceTimersByTimeAsync(50);
+      await settled;
+
+      expect(send).not.toHaveBeenCalled();
+      // One look, then the missing expiry decides it. Not a loop.
+      expect(polls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refuses an unknown decision on the re-check after an approval", async () => {
     let inspects = 0;
     const { sai } = client((url) => {
