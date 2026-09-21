@@ -521,3 +521,32 @@ describe("a redact with nothing to send", () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+describe("the README says the version that is published", () => {
+  /*
+   * The table's "Both are x.y.z" line drifted twice — it said 0.2.1 while
+   * npm and PyPI were on 0.2.3. It is the first thing on the repository
+   * page, so it is what somebody checks before deciding whether to upgrade,
+   * and a stale number there tells them not to bother.
+   *
+   * Both packages are released together and share a number, so one
+   * assertion covers both.
+   */
+  it("matches package.json", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { dirname, join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+
+    // Anchored to this file, not to the working directory: CI runs the suite
+    // from typescript/ and a developer may run it from the repo root.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(
+      readFileSync(join(here, "..", "package.json"), "utf8"),
+    ) as { version: string };
+    const readme = readFileSync(join(here, "..", "..", "README.md"), "utf8");
+
+    const claimed = readme.match(/Both are (\d+\.\d+\.\d+)\./);
+    expect(claimed, "the README no longer states a version in the expected shape").not.toBeNull();
+    expect(claimed![1]).toBe(pkg.version);
+  });
+});

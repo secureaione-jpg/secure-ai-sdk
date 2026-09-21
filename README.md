@@ -13,7 +13,7 @@ and gets back a decision before it does it.
 | [TypeScript](typescript) | `npm install @secure-ai/guard` | [npm](https://www.npmjs.com/package/@secure-ai/guard) |
 | [Python](python) | `pip install secure-ai-guard` | [PyPI](https://pypi.org/project/secure-ai-guard/) |
 
-Both are 0.2.1. Neither has a dependency. If you would rather not install
+Both are 0.2.3. Neither has a dependency. If you would rather not install
 anything, the gateway and the MCP endpoint below need no client library.
 
 Upgrade from 0.2.0 if you have it: that version defaulted to a hostname that
