@@ -91,6 +91,44 @@ SecureAI(api_key=..., on_unreachable="open")   # availability over control
 Failing open never waves a real refusal through — a 401, 402 or quota error is
 an answer, not an outage, and still raises.
 
+## No code to change at all
+
+If wrapping each tool is too invasive, point the HTTP client the agent already
+uses at the gateway. Every request it makes is inspected on the way out, and
+no call site changes:
+
+```python
+from openai import OpenAI
+
+openai = OpenAI(
+    base_url=sai.gateway_url("https://api.openai.com/v1"),
+    default_headers=sai.gateway_headers(forward_auth=f"Bearer {os.environ['OPENAI_KEY']}"),
+)
+```
+
+Two credentials travel and they are kept apart on purpose: your Secure AI key
+authenticates you to us and is **never** forwarded; `forward_auth` is the
+destination's own and becomes the outbound `Authorization`.
+
+For code that makes a call rather than holding a client:
+
+```python
+res = sai.gateway("POST", "https://api.vendor.com/v1/send", body={"to": "ana@clientfirm.com"})
+res.status, res.json(), res.decision
+```
+
+That form raises `ActionBlocked` on a refusal, so it fails the way a guarded
+function fails. Pass `raise_on_block=False` to get the response back instead.
+A 403 from the destination itself is not mistaken for one of ours — only our
+own `blocked_by_policy` code raises.
+
+The gateway will not forward to private or link-local addresses, so it cannot
+be pointed at a cloud metadata service. Bodies it cannot read as text — an
+image, a zip — are forwarded and the response carries
+`X-Secure-AI-Inspected: false`, rather than a clean log implying a check that
+did not happen.
+
+
 ## No dependencies
 
 Standard library only. This runs beside your model client and your framework,

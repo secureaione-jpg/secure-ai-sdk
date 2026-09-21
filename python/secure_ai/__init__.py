@@ -43,11 +43,14 @@ __all__ = [
     "SecureAIError",
     "Approval",
     "Finding",
+    "GatewayResponse",
     "Inspection",
     "KINDS",
 ]
 
-__version__ = "0.2.0"
+#: Kept in step with pyproject by a test. This had drifted to 0.2.0 while
+#: the package shipped 0.2.2, and this is the number a caller reports.
+__version__ = "0.2.3"
 
 Decision = Literal["allow", "redact", "approve", "block"]
 Direction = Literal["outbound", "inbound"]
@@ -95,6 +98,73 @@ class Inspection:
     approval_id: str | None = None
     #: When waiting stops being worth it. Milliseconds since epoch.
     expires_at: int | None = None
+
+
+def _lower_headers(headers: Any) -> dict[str, str]:
+    """Header names folded, because HTTP does not care and callers do."""
+    try:
+        return {str(k).lower(): str(v) for k, v in dict(headers or {}).items()}
+    except Exception:
+        return {}
+
+
+def _blocked_by_policy(raw: bytes) -> bool:
+    """A 403 the policy caused, told apart from a 403 the destination did.
+
+    The destination's own refusal must not read as ours: an agent told its
+    action was blocked when the vendor simply rejected the key will have the
+    wrong thing fixed. Only our code means ours.
+    """
+    try:
+        body = json.loads(raw.decode("utf-8", "replace")) or {}
+        return ((body.get("error") or {}).get("code")) == "blocked_by_policy"
+    except Exception:
+        return False
+
+
+def _refusal(audit_id: str) -> "Inspection":
+    """A block, shaped like an inspection, so ActionBlocked reads the same
+    whether it came from guard() or from the gateway."""
+    return Inspection(
+        decision="block",
+        input=None,
+        map={},
+        findings=[],
+        tool_denied=False,
+        policy_source="account",
+        audit_id=audit_id,
+    )
+
+
+@dataclass(frozen=True)
+class GatewayResponse:
+    """What came back through the gateway.
+
+    Deliberately small, and not an ``http.client`` response: this package
+    has no dependencies, and anybody wanting a real client should point
+    their own at :meth:`SecureAI.gateway_url` rather than use this.
+    """
+
+    status: int
+    body: bytes
+    headers: dict[str, str]
+
+    def json(self) -> Any:
+        """The body parsed, for the common case."""
+        return json.loads(self.body.decode("utf-8"))
+
+    @property
+    def text(self) -> str:
+        return self.body.decode("utf-8", "replace")
+
+    @property
+    def decision(self) -> str | None:
+        """What the policy said about this request, if it said anything."""
+        return self.headers.get("x-secure-ai-decision")
+
+    @property
+    def audit_id(self) -> str | None:
+        return self.headers.get("x-secure-ai-audit-id")
 
 
 def _sendable(tool: str, verdict: "Inspection", original: Any) -> Any:
@@ -507,6 +577,114 @@ class SecureAI:
         guarded.__name__ = getattr(fn, "__name__", "guarded")
         guarded.__doc__ = getattr(fn, "__doc__", None)
         return guarded
+
+    # ── The gateway ─────────────────────────────────────────────────────
+
+    def gateway_url(self, destination: str) -> str:
+        """A base URL to point an existing client at.
+
+        The other integration, for code that cannot be wrapped. The
+        TypeScript client does this by handing back a ``fetch``. Python has
+        no single function every library accepts, and this package has no
+        dependencies to hook into, so the equivalent here is an address.
+
+        Most clients take a base URL, and the gateway reads the destination
+        out of the path, so pointing one here is the whole change::
+
+            OpenAI(
+                base_url=sai.gateway_url("https://api.openai.com/v1"),
+                default_headers=sai.gateway_headers(forward_auth=vendor_key),
+            )
+
+        Every request that client makes is then inspected on the way out,
+        with no call site touched.
+
+        One caveat. On secureai.one the proxy in front collapses the ``//``
+        in the destination's scheme and answers 308 to the same path a slash
+        shorter. The redirect is relative, so the key survives it and the
+        gateway reads the destination correctly -- but a client told not to
+        follow redirects stops there. Use :meth:`gateway_headers` with
+        ``target`` instead if that is the case.
+        """
+        return f"{self.base_url}/v1/gateway/{destination}"
+
+    def gateway_headers(
+        self,
+        *,
+        forward_auth: str | None = None,
+        agent: str | None = None,
+        target: str | None = None,
+    ) -> dict[str, str]:
+        """The headers a client needs to talk to the gateway.
+
+        ``forward_auth`` is the destination's own credential. It travels as
+        ``X-Secure-AI-Forward-Authorization`` and becomes the outbound
+        ``Authorization``; ours never leaves. Two headers rather than one is
+        what stops either being sent where the other belongs.
+
+        ``target`` names the destination in a header instead of in the URL,
+        for a client that will not follow a redirect or will not tolerate a
+        URL inside a URL.
+        """
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        if target:
+            headers["X-Secure-AI-Target"] = target
+        if forward_auth:
+            headers["X-Secure-AI-Forward-Authorization"] = forward_auth
+        named = agent or self.agent
+        if named:
+            headers["X-Secure-AI-Agent"] = named
+        return headers
+
+    def gateway(
+        self,
+        method: str,
+        url: str,
+        *,
+        body: Any = None,
+        headers: dict[str, str] | None = None,
+        forward_auth: str | None = None,
+        agent: str | None = None,
+        raise_on_block: bool = True,
+    ) -> "GatewayResponse":
+        """One request through the gateway, with no other library.
+
+        For code that makes a call rather than holding a client. A refusal
+        raises :class:`ActionBlocked` by default so it fails the way a
+        guarded function fails, rather than handing back a 403 the caller
+        has to remember to check. Same default as the TypeScript client.
+        """
+        sent = dict(headers or {})
+        sent.update(self.gateway_headers(forward_auth=forward_auth, agent=agent, target=url))
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            sent.setdefault("Content-Type", "application/json")
+
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/gateway",
+            data=data,
+            method=method.upper(),
+            headers=sent,
+        )
+        opener = self._opener or urllib.request.urlopen
+        try:
+            with opener(req, timeout=self.timeout) as res:
+                return GatewayResponse(
+                    status=getattr(res, "status", 200),
+                    body=res.read(),
+                    headers=_lower_headers(getattr(res, "headers", None)),
+                )
+        except urllib.error.HTTPError as exc:
+            raw_body = exc.read()
+            out = GatewayResponse(
+                status=exc.code,
+                body=raw_body,
+                headers=_lower_headers(exc.headers),
+            )
+            if raise_on_block and exc.code == 403 and _blocked_by_policy(raw_body):
+                raise ActionBlocked(url, _refusal(out.headers.get("x-secure-ai-audit-id", ""))) from None
+            return out
 
     def guarded(self, tool: str, **kwargs: Any) -> Callable[[Callable[[Any], T]], Callable[[Any], T]]:
         """:meth:`guard` as a decorator.

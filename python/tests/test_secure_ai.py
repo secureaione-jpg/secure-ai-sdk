@@ -546,3 +546,77 @@ class TestAnApprovalWithNoExpiry:
         assert sent == []
         # One look, then the missing expiry decides it. Not a loop.
         assert polls["n"] == 1
+
+
+class TestTheGateway:
+    """The other integration: code that cannot be wrapped.
+
+    The TypeScript client hands back a ``fetch``. Python has no single
+    function every library accepts and this package has no dependencies, so
+    the equivalent is an address plus headers, and one direct call for code
+    that is not holding a client.
+    """
+
+    def test_the_url_carries_the_destination_in_the_path(self):
+        _, sai = client(lambda req: FakeResponse({}))
+        assert sai.gateway_url("https://api.openai.com/v1") == (
+            "https://api.test/v1/gateway/https://api.openai.com/v1"
+        )
+
+    def test_our_key_and_the_vendors_stay_apart(self):
+        """The whole reason there are two headers. Ours must never be the
+        one that reaches the destination."""
+        _, sai = client(lambda req: FakeResponse({}))
+        h = sai.gateway_headers(forward_auth="sk-vendor-key")
+        assert h["Authorization"] == "Bearer sai_test"
+        assert h["X-Secure-AI-Forward-Authorization"] == "sk-vendor-key"
+        assert "sk-vendor-key" not in h["Authorization"]
+
+    def test_names_the_agent_so_its_requests_group_in_the_trail(self):
+        _, sai = client(lambda req: FakeResponse({}), agent="nightly")
+        assert sai.gateway_headers()["X-Secure-AI-Agent"] == "nightly"
+        assert sai.gateway_headers(agent="other")["X-Secure-AI-Agent"] == "other"
+
+    def test_a_direct_call_sends_the_destination_and_the_body(self):
+        calls, sai = client(lambda req: FakeResponse({"ok": True}))
+        res = sai.gateway("POST", "https://api.vendor.com/v1/send", body={"to": "ana@x.com"})
+        assert res.status == 200
+        assert res.json() == {"ok": True}
+        assert calls[0]["url"] == "https://api.test/v1/gateway"
+        assert calls[0]["headers"]["x-secure-ai-target"] == "https://api.vendor.com/v1/send"
+        assert calls[0]["body"] == {"to": "ana@x.com"}
+
+    def test_a_refusal_raises_rather_than_returning_the_403(self):
+        """So it fails the way a guarded function fails."""
+        _, sai = client(lambda req: http_error(403, {"error": {"code": "blocked_by_policy"}}))
+        with pytest.raises(ActionBlocked):
+            sai.gateway("POST", "https://api.vendor.com/send", body={"card": "4111111111111111"})
+
+    def test_hands_the_response_back_instead_when_asked(self):
+        _, sai = client(lambda req: http_error(403, {"error": {"code": "blocked_by_policy"}}))
+        res = sai.gateway("POST", "https://api.vendor.com/send", raise_on_block=False)
+        assert res.status == 403
+
+    def test_does_not_mistake_the_destinations_own_403_for_a_policy_block(self):
+        """A vendor rejecting the key is not our policy refusing the action.
+        Told apart by the code, because an agent sent the wrong message here
+        has the wrong thing fixed."""
+        _, sai = client(lambda req: http_error(403, {"error": {"message": "invalid vendor key"}}))
+        res = sai.gateway("POST", "https://api.vendor.com/send")
+        assert res.status == 403
+        assert "invalid vendor key" in res.text
+
+
+class TestTheVersionMatchesThePackage:
+    def test_dunder_version_equals_pyproject(self):
+        """These drifted: the module said 0.2.0 while the package shipped
+        0.2.2, and the module's number is the one a caller quotes."""
+        import pathlib
+        import re
+
+        import secure_ai
+
+        text = (pathlib.Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+        declared = re.search(r'^version = "([^"]+)"', text, re.M)
+        assert declared, "pyproject has no version"
+        assert secure_ai.__version__ == declared.group(1)
