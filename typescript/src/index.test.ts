@@ -529,24 +529,79 @@ describe("the README says the version that is published", () => {
    * page, so it is what somebody checks before deciding whether to upgrade,
    * and a stale number there tells them not to bother.
    *
-   * Both packages are released together and share a number, so one
-   * assertion covers both.
+   * ── Why this file has to know which checkout it is in ──
+   *
+   * The clients live in two places. They are written in secure-ai-web under
+   * sdk/, and they are published from secure-ai-sdk, which is the public
+   * repository with that README on its front page. This test file is a
+   * verbatim copy in both.
+   *
+   * It was written for the published layout and pointed two directories up
+   * from src/ — the repository root there, and sdk/ in secure-ai-web, which
+   * has no README and never had one. So the copy that runs beside the code
+   * as it is being written threw ENOENT on every run: a red test nobody
+   * could act on, which is the kind that teaches people to ignore the suite.
+   *
+   * Both halves below assert something in both checkouts. The one that
+   * cannot check the README says so by requiring that there is nothing to
+   * check, rather than passing quietly — the failure mode this whole
+   * session has been about.
    */
-  it("matches package.json", async () => {
-    const { readFileSync } = await import("node:fs");
-    const { dirname, join } = await import("node:path");
+  const paths = async () => {
+    const { dirname, join, basename } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
-
-    // Anchored to this file, not to the working directory: CI runs the suite
-    // from typescript/ and a developer may run it from the repo root.
     const here = dirname(fileURLToPath(import.meta.url));
-    const pkg = JSON.parse(
-      readFileSync(join(here, "..", "package.json"), "utf8"),
-    ) as { version: string };
-    const readme = readFileSync(join(here, "..", "..", "README.md"), "utf8");
+    const pkgDir = join(here, "..");
+    const above = join(pkgDir, "..");
+    return {
+      join,
+      pkgDir,
+      above,
+      /* sdk/typescript/src in secure-ai-web; typescript/src in the published
+         repo, where the README sits beside the package. */
+      isSourceRepo: basename(above) === "sdk",
+    };
+  };
 
-    const claimed = readme.match(/Both are (\d+\.\d+\.\d+)\./);
+  /** The version each package.json / pyproject.toml declares. They are
+   *  released together and the README says so in one sentence, which only
+   *  means anything while the two numbers are actually equal. */
+  const declared = async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join, pkgDir, above, isSourceRepo } = await paths();
+    const ts = (
+      JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as { version: string }
+    ).version;
+    const pyToml = readFileSync(join(above, "python", "pyproject.toml"), "utf8");
+    const py = pyToml.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"/m);
+    return { ts, py: py?.[1], above, join, isSourceRepo };
+  };
+
+  it("ships the same number in both clients", async () => {
+    const { ts, py } = await declared();
+    expect(py, "pyproject.toml no longer states a version in the expected shape").toBeTruthy();
+    expect(py, "npm and PyPI would be on different versions and the README could not be true of both").toBe(ts);
+  });
+
+  it("matches package.json", async () => {
+    const { readFileSync, existsSync } = await import("node:fs");
+    const { ts, above, join, isSourceRepo } = await declared();
+    const readme = join(above, "README.md");
+
+    if (isSourceRepo) {
+      // secure-ai-web. There is no front page advertising a version here,
+      // and if somebody adds one it has to be kept in step — so the absence
+      // is the assertion rather than a reason to skip.
+      expect(
+        !existsSync(readme) || !/Both are \d+\.\d+\.\d+\./.test(readFileSync(readme, "utf8")),
+        `${readme} now advertises a version — check it against package.json here rather than only in the published repo`,
+      ).toBe(true);
+      return;
+    }
+
+    expect(existsSync(readme), `${readme} is missing — it is the published repo's front page`).toBe(true);
+    const claimed = readFileSync(readme, "utf8").match(/Both are (\d+\.\d+\.\d+)\./);
     expect(claimed, "the README no longer states a version in the expected shape").not.toBeNull();
-    expect(claimed![1]).toBe(pkg.version);
+    expect(claimed![1]).toBe(ts);
   });
 });
