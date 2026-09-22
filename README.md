@@ -8,10 +8,10 @@ nothing that watches what people type ever sees it go. These libraries put a
 check in front of the action instead: the agent says what it is about to do,
 and gets back a decision before it does it.
 
-| | Install | Published |
-|---|---|---|
-| [TypeScript](typescript) | `npm install @secure-ai/guard` | [npm](https://www.npmjs.com/package/@secure-ai/guard) |
-| [Python](python) | `pip install secure-ai-guard` | [PyPI](https://pypi.org/project/secure-ai-guard/) |
+| | Install | Requires | Published |
+|---|---|---|---|
+| [TypeScript](typescript) | `npm install @secure-ai/guard` | Node 18+ | [npm](https://www.npmjs.com/package/@secure-ai/guard) |
+| [Python](python) | `pip install secure-ai-guard` | Python 3.9+ | [PyPI](https://pypi.org/project/secure-ai-guard/) |
 
 Both are 0.2.3. Neither has a dependency. If you would rather not install
 anything, the gateway and the MCP endpoint below need no client library.
