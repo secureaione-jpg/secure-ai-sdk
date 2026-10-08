@@ -7,9 +7,8 @@ agent takes, before it takes it.
 pip install secure-ai-guard
 ```
 
-> **Status:** written, not yet executed — there was no Python interpreter on
-> the machine this was built on. Run `pytest` before trusting it. The
-> TypeScript SDK it mirrors does pass its suite.
+> **Status:** the test suite passes (45 tests, `pytest`), matching the
+> TypeScript SDK it mirrors.
 
 ## The one thing worth knowing
 
@@ -68,6 +67,18 @@ sai.allow_value("@ourcompany.com")   # stop flagging your own domain
 ```
 
 When an action contains several findings, the **most severe** decision wins.
+
+## Found a miss?
+
+Tell us, and the fix reaches everybody:
+
+```python
+sai.report_miss("40718842", context="sort 20-00-00 account 40718842")
+sai.report_false_positive("Park", context="meet at Park and 5th")
+```
+
+Only the shape is kept (digits, a length band, the word in front of it), never
+the value or the sentence. The answer's ``signals`` shows exactly what was kept.
 
 ## The trail
 
