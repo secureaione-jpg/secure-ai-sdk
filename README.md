@@ -16,6 +16,17 @@ and gets back a decision before it does it.
 Both are 0.2.3. Neither has a dependency. If you would rather not install
 anything, the gateway and the MCP endpoint below need no client library.
 
+For apps, there are clients for iPhone and Android too, with private chat
+(names and numbers swapped out before a model reads them, and back in the
+answer) as well as `guard`:
+
+| | Install | Requires |
+|---|---|---|
+| [Swift](swift) | Swift Package Manager: `https://github.com/secureaione-jpg/secure-ai-sdk`, from `0.1.0` | iOS 15, macOS 12 |
+| [Kotlin](kotlin) | `implementation("com.github.secureaione-jpg:secure-ai-sdk:0.1.0")` from [JitPack](https://jitpack.io/#secureaione-jpg/secure-ai-sdk) | Android 7, Java 17 |
+
+Both are 0.1.0. Swift has no dependency; Kotlin needs only kotlinx-coroutines.
+
 Upgrade from 0.2.0 if you have it: that version defaulted to a hostname that
 was never created, so every call failed on DNS.
 
