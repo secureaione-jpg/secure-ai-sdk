@@ -13,7 +13,7 @@ and gets back a decision before it does it.
 | [TypeScript](typescript) | `npm install @secure-ai/guard` | Node 18+ | [npm](https://www.npmjs.com/package/@secure-ai/guard) |
 | [Python](python) | `pip install secure-ai-guard` | Python 3.9+ | [PyPI](https://pypi.org/project/secure-ai-guard/) |
 
-Both are 0.2.3. Neither has a dependency. If you would rather not install
+Both are 0.3.0. Neither has a dependency. If you would rather not install
 anything, the gateway and the MCP endpoint below need no client library.
 
 For apps, there are clients for iPhone and Android too, with private chat

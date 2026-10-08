@@ -1,6 +1,6 @@
 {
   "name": "@secure-ai/guard",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Data loss prevention for AI agents. Inspect what an agent is about to do, before it does it.",
   "license": "MIT",
   "type": "module",
