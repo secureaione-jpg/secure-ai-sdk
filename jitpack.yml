@@ -1,0 +1,6 @@
+# Android and JVM builds of the Kotlin client, from a tag:
+#   implementation("com.github.secureaione-jpg:secure-ai-sdk:<tag>")
+jdk:
+  - openjdk17
+install:
+  - cd kotlin && ./gradlew publishToMavenLocal -PpublishGroup=com.github.secureaione-jpg -PartifactName=secure-ai-sdk -PpublishVersion=$VERSION

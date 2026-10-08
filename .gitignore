@@ -6,3 +6,6 @@ __pycache__/
 *.egg-info/
 .venv/
 build/
+.build/
+.swiftpm/
+Package.resolved
