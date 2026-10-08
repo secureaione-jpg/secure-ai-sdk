@@ -50,7 +50,7 @@ __all__ = [
 
 #: Kept in step with pyproject by a test. This had drifted to 0.2.0 while
 #: the package shipped 0.2.2, and this is the number a caller reports.
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 
 Decision = Literal["allow", "redact", "approve", "block"]
 Direction = Literal["outbound", "inbound"]
@@ -447,6 +447,31 @@ class SecureAI:
         """
         return self._request("POST", "/v1/policy/allow", {"value": value})
 
+    def report_miss(self, value: str, *, context: str | None = None) -> dict[str, Any]:
+        """Tell the scanner it missed something, so it is fixed for everybody.
+
+        ``allow_value`` fixes your account; this teaches the scanner. Only the
+        shape is kept — a run of digits, two capitalised words, the word in
+        front of it — never the value or the sentence, which are read once to
+        work that out and then dropped. Pass the sentence as ``context`` when
+        you have it: "account 40718842" and "order 40718842" are the same
+        digits and different mistakes.
+        """
+        return self._feedback("miss", value, context)
+
+    def report_false_positive(self, value: str, *, context: str | None = None) -> dict[str, Any]:
+        """The other direction: something was redacted that should not have been.
+
+        Pair it with ``allow_value`` to stop it on your account in the meantime.
+        """
+        return self._feedback("false_positive", value, context)
+
+    def _feedback(self, kind: str, value: str, context: str | None) -> dict[str, Any]:
+        body: dict[str, Any] = {"type": kind, "value": value}
+        if context is not None:
+            body["context"] = context
+        return self._request("POST", "/v1/feedback", body)
+
     def audit(self, *, limit: int | None = None, cursor: str | None = None) -> dict[str, Any]:
         """What agents did, newest first. Kinds and locations, never values."""
         query = []
@@ -593,7 +618,9 @@ class SecureAI:
 
             OpenAI(
                 base_url=sai.gateway_url("https://api.openai.com/v1"),
-                default_headers=sai.gateway_headers(forward_auth=vendor_key),
+                default_headers=sai.gateway_headers(
+                    forward_auth=f"Bearer {vendor_key}",
+                ),
             )
 
         Every request that client makes is then inspected on the way out,
@@ -617,10 +644,13 @@ class SecureAI:
     ) -> dict[str, str]:
         """The headers a client needs to talk to the gateway.
 
-        ``forward_auth`` is the destination's own credential. It travels as
-        ``X-Secure-AI-Forward-Authorization`` and becomes the outbound
-        ``Authorization``; ours never leaves. Two headers rather than one is
-        what stops either being sent where the other belongs.
+        ``forward_auth`` is the destination's own ``Authorization`` header,
+        verbatim — the scheme included, so ``Bearer sk-...`` and not
+        ``sk-...``. It travels as ``X-Secure-AI-Forward-Authorization`` and
+        is written out exactly as sent, so a bare key arrives at the vendor
+        with no scheme and is refused there, which reads as our gateway
+        breaking their auth. Ours never leaves. Two headers rather than one
+        is what stops either being sent where the other belongs.
 
         ``target`` names the destination in a header instead of in the URL,
         for a client that will not follow a redirect or will not tolerate a

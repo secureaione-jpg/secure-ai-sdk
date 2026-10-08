@@ -1,4 +1,9 @@
 {
+  // noUncheckedIndexedAccess is off because src/sealed/ is the web app's own
+  // attestation verifier, copied byte for byte (sdk/sealedCopyDrift.test.ts
+  // holds the copies together) from a codebase that does not use it. Making
+  // the copy differ to satisfy a lint would end the guarantee that the SDK
+  // verifies an enclave exactly as the app does.
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
@@ -8,7 +13,6 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
-    "noUncheckedIndexedAccess": true,
     "skipLibCheck": true
   },
   "include": ["src/index.ts"]

@@ -187,6 +187,15 @@ describe("policy and trail", () => {
     expect(calls[0].body).toEqual({ value: "@ours.com" });
   });
 
+  it("reports a miss and a false positive to the feedback endpoint", async () => {
+    const { calls, sai } = client(() => ({ body: { object: "feedback", received: 1, counted: 1, signals: [] } }));
+    await sai.reportMiss("40718842", { context: "account 40718842" });
+    await sai.reportFalsePositive("Park");
+    expect(calls.map((c) => c.url)).toEqual(["https://api.test/v1/feedback", "https://api.test/v1/feedback"]);
+    expect(calls[0].body).toEqual({ type: "miss", value: "40718842", context: "account 40718842" });
+    expect(calls[1].body).toEqual({ type: "false_positive", value: "Park" });
+  });
+
   it("passes paging through on the query string", async () => {
     const { calls, sai } = client(() => ({ body: { events: [], cursor: null } }));
     await sai.audit({ limit: 10, cursor: "abc" });

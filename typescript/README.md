@@ -32,6 +32,25 @@ call site.
 If the policy refuses the action, the wrapped function is never called and
 `ActionBlocked` is thrown.
 
+## Secure mode: nobody in between can read it
+
+```ts
+const answer = await sai.secureChat({
+  messages: [{ role: "user", content: "Summarise Sara Whitfield's file" }],
+  onText: (piece) => process.stdout.write(piece),
+});
+```
+
+The conversation is sealed in your process to a key that exists only inside
+an AWS Nitro enclave, after checking AWS's signed proof of which program holds
+it. Secure AI relays it without being able to open it. If the proof does not
+check out, nothing is sent and `SecureModeError` is thrown with
+`reason: "unverified"`.
+
+Part of the API subscription, priced per message. Pin the enclave builds you
+trust with `new SecureAI({ apiKey, trustedImages: [...] })`; otherwise the
+list `GET /v1/sealed` publishes is used.
+
 ## Getting the real values back
 
 Redaction is reversible with the map the inspection returned. The map is
@@ -71,6 +90,18 @@ await sai.allowValue("@ourcompany.com");
 ```
 
 That applies to every agent on the account from the next action onward.
+
+## Found a miss?
+
+Tell us, and the fix reaches everybody:
+
+```ts
+await sai.reportMiss("40718842", { context: "sort 20-00-00 account 40718842" });
+await sai.reportFalsePositive("Park", { context: "meet at Park and 5th" });
+```
+
+Only the shape is kept (digits, a length band, the word in front of it), never
+the value or the sentence. The answer's `signals` shows exactly what was kept.
 
 ## The trail
 
