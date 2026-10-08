@@ -23,6 +23,10 @@
  * fetch and nothing else: Node 18+, Bun, Deno, Cloudflare Workers, browsers.
  */
 
+import { SecureMode, type SecureChatOptions, type SealedInfo } from "./secure.js";
+
+export { SecureModeError, type SecureChatOptions, type SecureMessage, type SealedInfo } from "./secure.js";
+
 export type Decision = "allow" | "redact" | "approve" | "block";
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
 export type Direction = "outbound" | "inbound";
@@ -87,6 +91,15 @@ export interface Policy {
   rules: Rule[];
   denyTools?: string[];
   allow?: string[];
+}
+
+/** What a report was reduced to. `signals` is everything that was kept. */
+export interface FeedbackResult {
+  object: "feedback";
+  received: number;
+  /** Fewer than `received` once the account passes its daily allowance. */
+  counted: number;
+  signals: Array<{ signal: "miss" | "false-positive"; shape: string; length: string; lead: string }>;
 }
 
 /** An action the policy refused. Thrown by a guarded function rather than
@@ -181,6 +194,12 @@ export interface ClientOptions {
    * swallows real refusals. Choosing it is a decision to record.
    */
   onUnreachable?: "closed" | "open";
+  /**
+   * Secure mode only: the enclave images to trust, as PCR0 hex. Omitted, the
+   * list `GET /v1/sealed` publishes is used. Pin your own to decide for
+   * yourself which builds may read your users' messages.
+   */
+  trustedImages?: string[];
 }
 
 /**
@@ -230,6 +249,8 @@ export class SecureAI {
   private readonly timeoutMs: number;
   private readonly doFetch: typeof globalThis.fetch;
   private readonly onUnreachable: "closed" | "open";
+  private readonly trustedImages?: string[];
+  private secure: SecureMode | null = null;
 
   constructor(options: ClientOptions) {
     if (!options?.apiKey) throw new Error("SecureAI needs an apiKey.");
@@ -237,8 +258,38 @@ export class SecureAI {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE).replace(/\/+$/, "");
     this.agent = options.agent;
     this.timeoutMs = options.timeoutMs ?? 5_000;
-    this.doFetch = options.fetch ?? globalThis.fetch;
+    // Bound: a browser refuses fetch called with any receiver but the window
+    // ("Illegal invocation"), and this is called as this.doFetch(...).
+    this.doFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.onUnreachable = options.onUnreachable ?? "closed";
+    this.trustedImages = options.trustedImages;
+  }
+
+  /**
+   * Secure mode: ask a model with nobody in between able to read it.
+   *
+   * The conversation is sealed in this process to a key held only inside a
+   * hardware-verified enclave, after checking AWS's signed proof of which
+   * program holds it. If that proof does not check out, nothing is sent.
+   * Part of the API subscription; priced per message (see the docs).
+   *
+   *     const answer = await sai.secureChat({
+   *       messages: [{ role: "user", content: "Summarise Sara Whitfield's file" }],
+   *       onText: (t) => process.stdout.write(t),
+   *     });
+   */
+  async secureChat(opts: SecureChatOptions): Promise<string> {
+    return this.secureMode().chat(opts);
+  }
+
+  /** What Secure mode will trust and which models it offers. */
+  async secureInfo(): Promise<SealedInfo> {
+    return this.secureMode().describe();
+  }
+
+  private secureMode(): SecureMode {
+    this.secure ??= new SecureMode(this.apiKey, this.baseUrl, this.doFetch, this.trustedImages);
+    return this.secure;
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -353,6 +404,26 @@ export class SecureAI {
    *  every agent on the account from the next action onwards. */
   async allowValue(value: string): Promise<{ policy: Policy; added: string }> {
     return this.request("POST", "/v1/policy/allow", { value });
+  }
+
+  /**
+   * Tell the scanner it missed something, so it is fixed for everybody.
+   *
+   * `allowValue` fixes your account; this teaches the scanner. Only the
+   * shape is kept — a run of digits, two capitalised words, the word in
+   * front of it — never the value or the sentence, which are read once to
+   * work that out and then dropped. Pass the sentence it was in as `context`
+   * when you have it: "account 40718842" and "order 40718842" are the same
+   * digits and different mistakes.
+   */
+  async reportMiss(value: string, opts?: { context?: string }): Promise<FeedbackResult> {
+    return this.request("POST", "/v1/feedback", { type: "miss", value, context: opts?.context });
+  }
+
+  /** The other direction: something was redacted that should not have been.
+   *  Pair it with `allowValue` to stop it on your account in the meantime. */
+  async reportFalsePositive(value: string, opts?: { context?: string }): Promise<FeedbackResult> {
+    return this.request("POST", "/v1/feedback", { type: "false_positive", value, context: opts?.context });
   }
 
   /** What agents on this account have been doing. Kinds and locations only;
@@ -528,15 +599,18 @@ export class SecureAI {
    * every request it makes is inspected on the way out. No call sites change
    * at all, which is the difference between an afternoon and a sprint.
    *
-   *     const openai = new OpenAI({ fetch: sai.fetch({ forwardAuth: key }) });
+   *     const openai = new OpenAI({ fetch: sai.fetch({ forwardAuth: `Bearer ${key}` }) });
    *
    * A blocked request throws ActionBlocked rather than returning the 403, so
    * it fails the same way a guarded function does. A caller who would rather
    * see the response sets `throwOnBlock: false`.
    */
   fetch(opts?: {
-    /** The credential for the destination, sent as its Authorization. Ours
-     *  never travels — see forwardHeaders in the Worker. */
+    /** The destination's Authorization header, verbatim — scheme included,
+     *  so `Bearer sk-…` and not `sk-…`. It is forwarded as written, so a
+     *  bare key arrives at the vendor without its scheme and is refused
+     *  there, which reads as our gateway breaking their auth. Ours never
+     *  travels — see forwardHeaders in the Worker. */
     forwardAuth?: string;
     agent?: string;
     throwOnBlock?: boolean;

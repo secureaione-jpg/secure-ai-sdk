@@ -128,12 +128,12 @@ class TestInspect:
 
     def test_turns_a_refusal_into_an_error_carrying_the_code(self) -> None:
         _calls, sai = client(lambda _r: http_error(402, {
-            "error": {"message": "No API access.", "code": "api_access_required"}
+            "error": {"message": "Free requests used up.", "code": "free_limit"}
         }))
         with pytest.raises(SecureAIError) as caught:
             sai.inspect("t", {})
         assert caught.value.status == 402
-        assert caught.value.code == "api_access_required"
+        assert caught.value.code == "free_limit"
 
     def test_survives_a_non_json_body_from_something_in_front_of_the_api(self) -> None:
         def opener(req, timeout=None):  # noqa: ARG001
@@ -240,6 +240,14 @@ class TestPolicyAndTrail:
         sai.allow_value("@ours.com")
         assert calls[0]["url"] == "https://api.test/v1/policy/allow"
         assert calls[0]["body"] == {"value": "@ours.com"}
+
+    def test_reports_a_miss_and_a_false_positive(self) -> None:
+        calls, sai = client(lambda _r: FakeResponse({"object": "feedback", "received": 1, "counted": 1, "signals": []}))
+        sai.report_miss("40718842", context="account 40718842")
+        sai.report_false_positive("Park")
+        assert [c["url"] for c in calls] == ["https://api.test/v1/feedback"] * 2
+        assert calls[0]["body"] == {"type": "miss", "value": "40718842", "context": "account 40718842"}
+        assert calls[1]["body"] == {"type": "false_positive", "value": "Park"}
 
     def test_passes_paging_on_the_query_string(self) -> None:
         calls, sai = client(lambda _r: FakeResponse({"events": [], "cursor": None}))
