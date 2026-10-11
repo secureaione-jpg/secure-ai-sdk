@@ -1,0 +1,53 @@
+# Publish the TypeScript SDK to npm.
+#
+# The same arrangement as publish-python.yml: on a tag, only after the tests
+# pass in the same job, and with no token. npm's trusted publishing names this
+# repository and this workflow on the npm side (package settings → Trusted
+# Publisher → GitHub Actions, workflow "publish-npm.yml"), and GitHub proves
+# the run's identity with a short-lived OIDC token. npm also records where the
+# package was built (provenance), so anybody installing it can check that the
+# tarball came from this repository and this commit.
+#
+# Release: bump typescript/package.json, then push a tag typescript-v<version>.
+name: Publish TypeScript
+
+on:
+  push:
+    tags: ["typescript-v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      # Required for trusted publishing and provenance. Nothing else.
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Trusted publishing needs npm 11.5 or later, which Node 24 ships.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+
+      # The tag and the package must agree, or a typo in either publishes a
+      # version nobody meant.
+      - name: The tag names the version in package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want="${GITHUB_REF_NAME#typescript-v}"
+          have="$(node -p 'require("./package.json").version')"
+          [ "$want" = "$have" ] || { echo "tag says $want, package.json says $have"; exit 1; }
+
+      # prepublishOnly builds dist/. Shows what is about to go out first.
+      - run: npm run build && npm pack --dry-run
+      - run: npm publish --access public --provenance
