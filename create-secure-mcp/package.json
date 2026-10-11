@@ -1,0 +1,34 @@
+{
+  "name": "create-secure-mcp",
+  "version": "0.1.0",
+  "description": "Create an MCP server whose tools never hand an AI model your customers' private details.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "create-secure-mcp": "index.js"
+  },
+  "files": [
+    "index.js",
+    "template",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "privacy",
+    "pii",
+    "redaction",
+    "ai-agents",
+    "secure-ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/secureaione-jpg/secure-ai-sdk.git",
+    "directory": "create-secure-mcp"
+  },
+  "homepage": "https://secureai.one/developers/mcp"
+}
