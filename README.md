@@ -82,6 +82,10 @@ checkable by reading the type rather than by trusting this sentence. Not a
 hash of one either: the space of card numbers and phone numbers is small
 enough to enumerate, so a hash of one is the value with extra steps.
 
+## Check our benchmark numbers yourself
+
+[`benchmarks/`](benchmarks/) runs the public PII test sets (Gretel, NVIDIA Nemotron, TAB, MAPA) against the live API with your own free key, and scores the answers. No Secure AI code involved: it calls `POST /v1/redact` like any customer.
+
 ## Documentation
 
 [secureai.one/developers](https://secureai.one/developers)
