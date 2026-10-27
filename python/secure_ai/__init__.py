@@ -36,8 +36,12 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, TypeVar
 from urllib.parse import quote, urlencode
 
+from ._restore import restore as _restore_locally
+
 __all__ = [
     "SecureAI",
+    "Redaction",
+    "restore",
     "ActionBlocked",
     "ApprovalRefused",
     "SecureAIError",
@@ -50,7 +54,7 @@ __all__ = [
 
 #: Kept in step with pyproject by a test. This had drifted to 0.2.0 while
 #: the package shipped 0.2.2, and this is the number a caller reports.
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 Decision = Literal["allow", "redact", "approve", "block"]
 Direction = Literal["outbound", "inbound"]
@@ -259,6 +263,28 @@ class Approval:
     decided_at: int | None = None
     note: str | None = None
 
+
+
+@dataclass
+class Redaction:
+    """What ``redact`` returns."""
+
+    #: The text with private details swapped for stand-ins: send this to the AI.
+    cleaned_text: str
+    #: Stand-in -> real value. Keep it private; ``restore`` needs it.
+    map: dict[str, str] = field(default_factory=dict)
+    #: How many of each kind were hidden, e.g. {"name": 2, "email": 1}.
+    entities_found: dict[str, int] = field(default_factory=dict)
+    spans: list[dict[str, Any]] | None = None
+
+    @property
+    def text(self) -> str:
+        """The same as cleaned_text (the API's original field name)."""
+        return self.cleaned_text
+
+
+#: Put real values back, on this machine. See secure_ai._restore.
+restore = _restore_locally
 
 class SecureAIError(RuntimeError):
     """The API answered, and said no.
@@ -487,9 +513,58 @@ class SecureAI:
         suffix = f"?limit={limit}" if limit else ""
         return self._request("GET", f"/v1/audit/summary{suffix}")
 
+    def redact(
+        self,
+        text: str,
+        *,
+        mapping: dict[str, str] | None = None,
+        allow: list[str] | None = None,
+        medical: bool = False,
+        organisations: bool | Literal["all"] = False,
+        strict: bool = False,
+        spans: bool = False,
+    ) -> Redaction:
+        """Take the private details out of text before it goes to any AI.
+
+        ::
+
+            r = sai.redact("Email Sarah Jones at sarah@acme.co")
+            reply = your_model(r.cleaned_text)
+            answer = sai.restore(reply, r.map)
+
+        Keep ``r.map`` as carefully as the text: it turns the stand-ins back
+        into real people, and Secure AI keeps no copy. Pass it back in as
+        ``mapping`` on the next turn so a person keeps the same stand-in.
+        """
+        body: dict[str, Any] = {"text": text}
+        if mapping:
+            body["map"] = mapping
+        if allow:
+            body["allow"] = allow
+        if medical:
+            body["medical"] = True
+        if organisations:
+            body["organisations"] = organisations
+        if strict:
+            body["strict"] = True
+        if spans:
+            body["spans"] = True
+        raw = self._request("POST", "/v1/redact", body)
+        cleaned = raw.get("cleaned_text", raw.get("text", ""))
+        return Redaction(
+            cleaned_text=cleaned,
+            map=dict(raw.get("map") or {}),
+            entities_found=dict(raw.get("entities_found") or {}),
+            spans=raw.get("spans"),
+        )
+
     def restore(self, text: str, mapping: dict[str, str]) -> str:
-        """Put real values back into a reply, using an inspection's map."""
-        return self._request("POST", "/v1/restore", {"text": text, "map": mapping})["text"]
+        """Put real values back into a reply, on this machine.
+
+        Since 0.4 nothing is sent: the map never leaves the process. The same
+        logic as the Secure AI service (see secure_ai._restore).
+        """
+        return _restore_locally(text, mapping)
 
     # ── the point of the library ────────────────────────────────────────────
 

@@ -13,7 +13,7 @@ and gets back a decision before it does it.
 | [TypeScript](typescript) | `npm install @secure-ai/guard` | Node 18+ | [npm](https://www.npmjs.com/package/@secure-ai/guard) |
 | [Python](python) | `pip install secure-ai-guard` | Python 3.9+ | [PyPI](https://pypi.org/project/secure-ai-guard/) |
 
-Both are 0.3.0. Neither has a dependency. If you would rather not install
+Both are 0.4.0. Neither has a dependency. If you would rather not install
 anything, the gateway and the MCP endpoint below need no client library.
 
 For apps, there are clients for iPhone and Android too, with private chat
@@ -29,6 +29,24 @@ Both are 0.1.0. Swift has no dependency; Kotlin needs only kotlinx-coroutines.
 
 Upgrade from 0.2.0 if you have it: that version defaulted to a hostname that
 was never created, so every call failed on DNS.
+
+## Hide details, then put them back
+
+New in 0.4.0: `redact` takes the private details out of text before it goes
+to any AI, and the real values go back in on your own machine. The map is
+yours; Secure AI keeps no copy.
+
+```ts
+const { cleaned_text, map } = await sai.redact("Email Sarah Jones at sarah@acme.co");
+const reply = await yourModel(cleaned_text);
+const answer = sai.restoreLocal(reply, map);
+```
+
+```python
+r = sai.redact("Email Sarah Jones at sarah@acme.co")
+reply = your_model(r.cleaned_text)
+answer = sai.restore(reply, r.map)
+```
 
 ## The one thing worth knowing
 

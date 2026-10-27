@@ -259,10 +259,35 @@ class TestPolicyAndTrail:
         sai.audit()
         assert calls[0]["url"] == "https://api.test/v1/audit"
 
-    def test_restores_a_reply(self) -> None:
-        _calls, sai = client(lambda _r: FakeResponse({"text": "call ana@example.org"}))
+    def test_restores_a_reply_on_this_machine(self) -> None:
+        calls, sai = client(lambda _r: FakeResponse({}))
         assert sai.restore("call person1@example.com", {"person1@example.com": "ana@example.org"}) \
             == "call ana@example.org"
+        assert calls == []
+
+    def test_redacts_with_the_developer_names(self) -> None:
+        calls, sai = client(lambda _r: FakeResponse({
+            "text": "Email Colette Marsh", "cleaned_text": "Email Colette Marsh",
+            "map": {"Colette Marsh": "Sarah Jones"}, "entities_found": {"name": 1},
+        }))
+        r = sai.redact("Email Sarah Jones", medical=True)
+        assert calls[0]["url"] == "https://api.test/v1/redact"
+        assert r.cleaned_text == r.text == "Email Colette Marsh"
+        assert r.entities_found == {"name": 1}
+        assert sai.restore("Hi Colette", r.map) == "Hi Sarah"
+
+
+class TestRestoreCases:
+    """The same answers as the Secure AI service and the TypeScript SDK."""
+
+    def test_every_shared_case(self) -> None:
+        from pathlib import Path
+
+        from secure_ai import restore
+
+        cases = json.loads((Path(__file__).resolve().parents[2] / "restore-cases.json").read_text())["cases"]
+        for case in cases:
+            assert restore(case["text"], case["map"]) == case["want"], case["name"]
 
 
 class TestFindings:

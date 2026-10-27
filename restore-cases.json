@@ -1,0 +1,18 @@
+{
+  "about": "What restore must answer, the same in the Worker, the TypeScript SDK and the Python SDK. The map runs stand-in to real value, as /v1/redact returns it.",
+  "cases": [
+    { "name": "a full stand-in", "map": { "Colette Marsh": "Sarah Jones" }, "text": "Write to Colette Marsh today.", "want": "Write to Sarah Jones today." },
+    { "name": "nothing to restore", "map": {}, "text": "Nothing here.", "want": "Nothing here." },
+    { "name": "longest first", "map": { "Okonkwo Otieno": "Priya Raghunathan", "Okonkwo": "Raghunathan" }, "text": "Okonkwo Otieno and Okonkwo.", "want": "Priya Raghunathan and Raghunathan." },
+    { "name": "one pass, never the wrong person", "map": { "Alpha": "Beta", "Beta": "Gamma" }, "text": "Ask Alpha.", "want": "Ask Beta." },
+    { "name": "a non-breaking hyphen", "map": { "21-4862": "55-1234" }, "text": "Account 21‑4862.", "want": "Account 55-1234." },
+    { "name": "a no-break space", "map": { "Yusuf Duarte": "Ann Lee" }, "text": "Dear Yusuf Duarte,", "want": "Dear Ann Lee," },
+    { "name": "all small letters", "map": { "Colette Marsh": "Sarah Jones" }, "text": "colette marsh", "want": "sarah jones" },
+    { "name": "all capitals", "map": { "Colette Marsh": "Sarah Jones" }, "text": "COLETTE MARSH", "want": "SARAH JONES" },
+    { "name": "half a stand-in name", "map": { "Colette Marsh": "Sarah Jones" }, "text": "Hi Colette, thanks. Ms Marsh agreed.", "want": "Hi Sarah, thanks. Ms Jones agreed." },
+    { "name": "half a name inside a longer word stays", "map": { "Colette Marsh": "Sarah Jones" }, "text": "Marshall Colettes", "want": "Marshall Colettes" },
+    { "name": "a half that is a real person's word stays", "map": { "Daniel Kowal": "Priya Raghunathan", "Tom Reyes": "Daniel Whitfield" }, "text": "Daniel said hi.", "want": "Daniel said hi." },
+    { "name": "a half that would map two ways stays", "map": { "Mark Ode": "Ann Lee", "Mark Fry": "Bob Kerr" }, "text": "Hi Mark.", "want": "Hi Mark." },
+    { "name": "an email", "map": { "lena.park@example.com": "sarah@acme.co" }, "text": "Email lena.park@example.com now.", "want": "Email sarah@acme.co now." }
+  ]
+}

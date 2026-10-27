@@ -208,11 +208,25 @@ describe("policy and trail", () => {
     expect(calls[0].url).toBe("https://api.test/v1/audit/summary");
   });
 
-  it("restores a reply from the map", async () => {
-    const { calls, sai } = client(() => ({ body: { text: "call ana@example.org" } }));
+  it("restores a reply from the map on this machine, sending nothing", async () => {
+    const { calls, sai } = client(() => ({ body: {} }));
     const out = await sai.restore("call person1@example.com", { "person1@example.com": "ana@example.org" });
     expect(out).toBe("call ana@example.org");
-    expect(calls[0].url).toBe("https://api.test/v1/restore");
+    expect(sai.restoreLocal("Hi Colette", { "Colette Marsh": "Sarah Jones" })).toBe("Hi Sarah");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("redacts, with the developer names and the original ones", async () => {
+    const { calls, sai } = client(() => ({ body: { object: "redaction", text: "Email Colette Marsh", cleaned_text: "Email Colette Marsh", map: { "Colette Marsh": "Sarah Jones" }, entities_found: { name: 1 } } }));
+    const r = await sai.redact("Email Sarah Jones", { medical: true });
+    expect(calls[0].url).toBe("https://api.test/v1/redact");
+    expect(calls[0].body).toEqual({ text: "Email Sarah Jones", medical: true });
+    expect(r).toMatchObject({ cleaned_text: "Email Colette Marsh", text: "Email Colette Marsh", entities_found: { name: 1 } });
+  });
+
+  it("reads an older server that only says text", async () => {
+    const { sai } = client(() => ({ body: { text: "Hi [x]", map: {} } }));
+    expect((await sai.redact("Hi")).cleaned_text).toBe("Hi [x]");
   });
 });
 

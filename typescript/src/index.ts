@@ -24,6 +24,11 @@
  */
 
 import { SecureMode, type SecureChatOptions, type SealedInfo } from "./secure.js";
+import { restore as restoreLocally } from "./restore.js";
+
+/** Puts the real values back, on this machine: no request, and the map never
+ *  leaves it. The same code the Secure AI service runs (2026-10-15). */
+export { restore } from "./restore.js";
 
 export { SecureModeError, type SecureChatOptions, type SecureMessage, type SealedInfo } from "./secure.js";
 
@@ -242,6 +247,33 @@ function toApproval(raw: Partial<Approval> | undefined): Approval {
   };
 }
 
+export interface RedactOptions {
+  /** The map from the conversation's earlier turns, so stand-ins stay the same. */
+  map?: Record<string, string>;
+  /** Values to leave as written. */
+  allow?: string[];
+  /** HIPAA Safe Harbor: dates but their year, ages over 89, towns, places of care, web and IP addresses. */
+  medical?: boolean;
+  /** Hide companies too; "all" adds courts, ministries and states. */
+  organisations?: boolean | "all";
+  strict?: boolean;
+  /** Also return where each hidden value was. */
+  spans?: boolean;
+}
+
+export interface Redaction {
+  /** The text with private details swapped for stand-ins: send this to the AI. */
+  cleaned_text: string;
+  /** The same as cleaned_text (the original field name). */
+  text: string;
+  /** Stand-in → real value. Keep it private; it is how restore works. */
+  map: Record<string, string>;
+  /** How many of each kind were hidden, e.g. { name: 2, email: 1 }. */
+  entities_found: Record<string, number>;
+  redacted?: number;
+  spans?: Array<{ start: number; end: number; type: string; text: string }>;
+}
+
 export class SecureAI {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -453,10 +485,48 @@ export class SecureAI {
     return this.request("GET", `/v1/audit/summary${qs}`);
   }
 
-  /** Put real values back into a reply, using the map from an inspection. */
+  /**
+   * Take the private details out of text before it goes to any AI.
+   *
+   *     const { cleaned_text, map } = await sai.redact("Email Sarah Jones at sarah@acme.co");
+   *     const reply = await yourModel(cleaned_text);
+   *     const answer = sai.restoreLocal(reply, map);
+   *
+   * Keep the map as carefully as the text itself: it is what turns the
+   * stand-ins back into real people, and Secure AI does not keep a copy.
+   * Pass it back in (`map`) on the next turn so the same person keeps the same
+   * stand-in across a conversation.
+   */
+  async redact(text: string, opts: RedactOptions = {}): Promise<Redaction> {
+    const raw = await this.request<Redaction & { kinds?: Record<string, number> }>("POST", "/v1/redact", {
+      text,
+      ...(opts.map ? { map: opts.map } : {}),
+      ...(opts.allow ? { allow: opts.allow } : {}),
+      ...(opts.medical ? { medical: true } : {}),
+      ...(opts.organisations ? { organisations: opts.organisations } : {}),
+      ...(opts.strict ? { strict: true } : {}),
+      ...(opts.spans ? { spans: true } : {}),
+    });
+    return {
+      ...raw,
+      cleaned_text: raw.cleaned_text ?? raw.text,
+      text: raw.text ?? raw.cleaned_text,
+      map: raw.map ?? {},
+      entities_found: raw.entities_found ?? {},
+    };
+  }
+
+  /** Put real values back into a reply, on this machine (see `restore`). */
+  restoreLocal(text: string, map: Record<string, string>): string {
+    return restoreLocally(text, map);
+  }
+
+  /**
+   * Put real values back into a reply. Runs locally since 0.4: the map is
+   * not sent anywhere. Kept async so code written for 0.3 keeps working.
+   */
   async restore(text: string, map: Record<string, string>): Promise<string> {
-    const out = await this.request<{ text: string }>("POST", "/v1/restore", { text, map });
-    return out.text;
+    return restoreLocally(text, map);
   }
 
   /**
