@@ -25,7 +25,7 @@ cpSync(join(here, "template"), target, { recursive: true });
 // npm drops a published .gitignore, so it travels as "gitignore".
 if (existsSync(join(target, "gitignore"))) renameSync(join(target, "gitignore"), join(target, ".gitignore"));
 
-for (const file of ["package.json", "README.md"]) {
+for (const file of ["package.json", "README.md", join("src", "index.ts")]) {
   const path = join(target, file);
   writeFileSync(path, readFileSync(path, "utf8").replaceAll("__NAME__", name));
 }
