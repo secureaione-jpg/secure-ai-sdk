@@ -50,6 +50,25 @@ let reply = try await sai.chat(
 
 Your vendor's key goes to the one call that needs it and is never stored.
 
+## Secure mode: nobody in between can read it
+
+```swift
+let answer = try await sai.secureChat([.user("Summarise Sara Whitfield's file")]) { piece in
+    text += piece
+}
+```
+
+The conversation is sealed on the device to a key that exists only inside an
+AWS Nitro enclave, after checking AWS's signed proof of which program holds
+it — with Apple's own certificate verifier, against the pinned AWS root.
+Secure AI relays it without being able to open it. If the proof does not
+check out, nothing is sent and `SecureModeError` is thrown with
+`reason == .unverified`.
+
+Part of the API subscription, priced per message. Pin the enclave builds you
+trust with `SecureAI(apiKey:trustedImages:)`; otherwise the list
+`GET /v1/sealed` publishes is used.
+
 ## Just hide and restore
 
 When you call the model yourself:

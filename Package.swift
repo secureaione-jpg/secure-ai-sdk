@@ -12,6 +12,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "SecureAI", path: "swift/Sources/SecureAI"),
-        .testTarget(name: "SecureAITests", dependencies: ["SecureAI"], path: "swift/Tests/SecureAITests"),
+        .testTarget(name: "SecureAITests", dependencies: ["SecureAI"], path: "swift/Tests/SecureAITests", resources: [.copy("attestation-enclave-v8.json")]),
     ]
 )

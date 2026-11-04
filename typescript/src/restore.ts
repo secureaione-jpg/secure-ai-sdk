@@ -100,7 +100,26 @@ export function restoreText(text: string, entries: Array<[string, string]>): str
       i += 1;
     }
   }
-  return plain === 0 ? text : out + text.slice(plain);
+  return cardTails(plain === 0 ? text : out + text.slice(plain), entries);
+}
+
+/* A reply that names a card by its last four only: "a refund to the card
+   ending in 4534". Those four are the stand-in's, and the whole number never
+   appears for the pass above to find, so the reply came back with digits
+   that belong to no card the user has (2026-10-25). Each card in the map
+   lends its last four, stand-in to real, and only as four digits standing
+   on their own. */
+function cardTails(text: string, entries: Array<[string, string]>): string {
+  const card = (v: string) => /^[\d -]+$/.test(v) && /^\d{13,19}$/.test(v.replace(/[ -]/g, ""));
+  const tails = new Map<string, string>();
+  for (const [fake, real] of entries) {
+    if (!card(fake) || !card(real)) continue;
+    const f = fake.replace(/\D/g, "").slice(-4);
+    const r = real.replace(/\D/g, "").slice(-4);
+    if (f !== r) tails.set(f, r);
+  }
+  if (tails.size === 0) return text;
+  return text.replace(/(?<!\d)\d{4}(?!\d)/g, (four) => tails.get(four) ?? four);
 }
 
 const WORD = /^[\p{L}'-]+$/u;

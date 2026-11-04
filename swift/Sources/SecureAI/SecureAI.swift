@@ -36,6 +36,10 @@ public final class SecureAI: Sendable {
     let timeout: TimeInterval
     let transport: SecureAITransport
     let whenUnreachable: WhenUnreachable
+    /// Secure mode only: the enclave builds (PCR0) to trust instead of the
+    /// list GET /v1/sealed publishes.
+    let trustedImages: [String]?
+    let secure = SecureModeState()
 
     /// - Parameters:
     ///   - apiKey: `sai_…`, from Settings → Developer.
@@ -48,6 +52,7 @@ public final class SecureAI: Sendable {
         agent: String? = nil,
         timeout: TimeInterval = 10,
         whenUnreachable: WhenUnreachable = .closed,
+        trustedImages: [String]? = nil,
         transport: SecureAITransport = URLSessionTransport()
     ) {
         precondition(!apiKey.isEmpty, "SecureAI needs an apiKey.")
@@ -56,6 +61,7 @@ public final class SecureAI: Sendable {
         self.agent = agent
         self.timeout = timeout
         self.whenUnreachable = whenUnreachable
+        self.trustedImages = trustedImages
         self.transport = transport
     }
 

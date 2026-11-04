@@ -51,6 +51,22 @@ Part of the API subscription, priced per message. Pin the enclave builds you
 trust with `new SecureAI({ apiKey, trustedImages: [...] })`; otherwise the
 list `GET /v1/sealed` publishes is used.
 
+## Names found on your machine
+
+With [`@secure-ai/names`](../names) the people in a text are found and swapped
+in your own process, with Secure AI's own model, so their names never reach
+Secure AI at all:
+
+```ts
+import { localNames } from "@secure-ai/names";
+
+const sai = new SecureAI({ apiKey, names: await localNames() });
+const { cleaned_text, map } = await sai.redact("Email Maria Delgado about the lease");
+```
+
+The returned `map` restores everything, and names swapped here are kept out
+of the map `redact` sends back on later turns.
+
 ## Getting the real values back
 
 Redaction is reversible with the map the inspection returned. The map is

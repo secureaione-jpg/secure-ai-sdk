@@ -205,6 +205,18 @@ export interface ClientOptions {
    * yourself which builds may read your users' messages.
    */
   trustedImages?: string[];
+  /**
+   * Find the people on this machine before anything is sent: pass
+   * `await localNames()` from @secure-ai/names. `redact` then swaps them for
+   * stand-ins in this process, so the real names never reach Secure AI, and
+   * the server swaps everything else as before.
+   */
+  names?: LocalNameSwap;
+}
+
+/** What @secure-ai/names' localNames() returns; any object with this shape works. */
+export interface LocalNameSwap {
+  swap(text: string, map?: Record<string, string>, opts?: { allow?: string[] }): Promise<{ text: string; map: Record<string, string> }>;
 }
 
 /**
@@ -283,6 +295,10 @@ export class SecureAI {
   private readonly onUnreachable: "closed" | "open";
   private readonly trustedImages?: string[];
   private secure: SecureMode | null = null;
+  private readonly names?: LocalNameSwap;
+  /** Stand-ins made on this machine. Their real names are never sent, not
+   *  even inside a map passed back in on a later turn. */
+  private readonly localFakes = new Set<string>();
 
   constructor(options: ClientOptions) {
     if (!options?.apiKey) throw new Error("SecureAI needs an apiKey.");
@@ -295,6 +311,7 @@ export class SecureAI {
     this.doFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.onUnreachable = options.onUnreachable ?? "closed";
     this.trustedImages = options.trustedImages;
+    this.names = options.names;
   }
 
   /**
@@ -498,9 +515,21 @@ export class SecureAI {
    * stand-in across a conversation.
    */
   async redact(text: string, opts: RedactOptions = {}): Promise<Redaction> {
+    const local: Record<string, string> = {};
+    if (this.names) {
+      const swapped = await this.names.swap(text, opts.map, { allow: opts.allow });
+      text = swapped.text;
+      for (const [fake, real] of Object.entries(swapped.map)) {
+        if (!opts.map || opts.map[fake] !== real || this.localFakes.has(fake)) {
+          local[fake] = real;
+          this.localFakes.add(fake);
+        }
+      }
+    }
+    const serverMap = opts.map && Object.fromEntries(Object.entries(opts.map).filter(([fake]) => !this.localFakes.has(fake)));
     const raw = await this.request<Redaction & { kinds?: Record<string, number> }>("POST", "/v1/redact", {
       text,
-      ...(opts.map ? { map: opts.map } : {}),
+      ...(serverMap ? { map: serverMap } : {}),
       ...(opts.allow ? { allow: opts.allow } : {}),
       ...(opts.medical ? { medical: true } : {}),
       ...(opts.organisations ? { organisations: opts.organisations } : {}),
@@ -511,7 +540,7 @@ export class SecureAI {
       ...raw,
       cleaned_text: raw.cleaned_text ?? raw.text,
       text: raw.text ?? raw.cleaned_text,
-      map: raw.map ?? {},
+      map: { ...(raw.map ?? {}), ...local },
       entities_found: raw.entities_found ?? {},
     };
   }
