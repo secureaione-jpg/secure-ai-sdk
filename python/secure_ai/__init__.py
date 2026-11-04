@@ -54,7 +54,7 @@ __all__ = [
 
 #: Kept in step with pyproject by a test. This had drifted to 0.2.0 while
 #: the package shipped 0.2.2, and this is the number a caller reports.
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 Decision = Literal["allow", "redact", "approve", "block"]
 Direction = Literal["outbound", "inbound"]
