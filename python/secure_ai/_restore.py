@@ -108,5 +108,5 @@ def restore(text: str, mapping: dict[str, str]) -> str:
     """Put the real values back: whole stand-ins, then halves of stand-in names."""
     out = restore_text(text, list(mapping.items()))
     for src, dst in half_names(mapping):
-        out = re.sub(rf"(?<!{_LETTER}){re.escape(src)}(?!{_LETTER})", lambda _m, d=dst: d, out)
+        out = re.sub(rf"(?<!{_LETTER}){re.escape(src)}(?!{_LETTER})", lambda _m: dst, out)  # re.sub calls it before the loop moves on
     return out
