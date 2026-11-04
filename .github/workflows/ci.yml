@@ -29,7 +29,8 @@ jobs:
       - run: npm run build
 
   python:
-    runs-on: ubuntu-latest
+    # 24.04: Ubuntu 26.04 runners have no Python 3.9, the oldest we support.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: python
